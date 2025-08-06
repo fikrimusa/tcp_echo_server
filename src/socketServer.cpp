@@ -97,10 +97,51 @@ void SocketServer::run(){
         else{
             // Check for new connections
             if(FD_ISSET(serverFD, &readfds)){
-                handleNewConnection();
+                //handleNewConnection();
+                sockaddr_in clientAddr{};
+                socklen_t addrLen = sizeof(clientAddr);
+
+                int clientFD = accept(serverFD, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
+                if(clientFD < 0){
+                    throw std::system_error(errno, std::system_category(), "accept() failed");
+                }
+                else{
+                    std::cout << std::endl << "Successfully accept connection from " << clientFD;
+                }
+
+                // Find empty slot
+                bool added = false;
+                for(auto& fd : clients){
+                    if(fd == 0){
+                        fd = clientFD;
+                        FD_SET(clientFD, &readfds);
+                        nMaxFD = std::max(nMaxFD, clientFD);
+                        
+                        // Log connection
+                        char client_ip[INET_ADDRSTRLEN];
+                        inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
+                        std::cout << std::endl << "New connection: " << client_ip << " (FD: " << clientFD << ")" << std::flush;
+                        
+                        // Send welcome
+                        constexpr std::string_view welcome = "This is server. Connection established";
+                        send(clientFD, welcome.data(), welcome.size(), 0);
+                        
+                        added = true;
+                        break;
+                    }
+                }
+
+                if(!added){
+                    constexpr std::string_view msg = "Server full. Disconnecting.";
+                    send(clientFD, msg.data(), msg.size(), 0);
+                    ::close(clientFD);
+                    std::cerr << std::endl << "Rejected connection - server full";
+                }
+
+
             }
 
-            // // Check client sockets
+            // Check client sockets
             for(int i = 0; i < MAXCLIENT; i++){
                 if(clients[i] > 0 && FD_ISSET(clients[i], &readfds)){
                     handleClientMessage(clients[i]);
@@ -110,51 +151,7 @@ void SocketServer::run(){
     }
 }
 
-void SocketServer::handleNewConnection(){
-    sockaddr_in clientAddr{};
-    socklen_t addrLen = sizeof(clientAddr);
 
-    int clientFD = accept(serverFD, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
-    if(clientFD < 0){
-        throw std::system_error(errno, std::system_category(), "accept() failed");
-    }
-
-    // Set non-blocking
-    int flags = fcntl(clientFD, F_GETFL, 0);
-    if(fcntl(clientFD, F_SETFL, flags | O_NONBLOCK) < 0){
-        ::close(clientFD);
-        throw std::system_error(errno, std::system_category(), "fcntl() failed");
-    }
-
-    // Find empty slot
-    bool added = false;
-    for(auto& fd : clients){
-        if(fd == 0){
-            fd = clientFD;
-            FD_SET(clientFD, &readfds);
-            nMaxFD = std::max(nMaxFD, clientFD);
-            
-            // Log connection
-            char client_ip[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
-            std::cout << std::endl << "New connection: " << client_ip << " (FD: " << clientFD << ")";
-            
-            // Send welcome
-            constexpr std::string_view welcome = "Connection established";
-            send(clientFD, welcome.data(), welcome.size(), 0);
-            
-            added = true;
-            break;
-        }
-    }
-
-    if(!added){
-        constexpr std::string_view msg = "Server full. Disconnecting.";
-        send(clientFD, msg.data(), msg.size(), 0);
-        ::close(clientFD);
-        std::cerr << std::endl << "Rejected connection - server full";
-    }
-}
 
 void SocketServer::handleClientMessage(int clientFD){
     std::array<char, 256> buffer{};
