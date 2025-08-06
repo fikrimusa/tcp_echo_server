@@ -164,7 +164,7 @@ void SocketServer::handleClientMessage(int clientFD){
     if(bytes == 0){
         // Client disconnected
         std::cout << std::endl << "Client " << clientFD << " disconnected gracefully";
-        handle_client_disconnect(clientFD);
+        handleClientDisconnect(clientFD);
         return;
     }
     else if(bytes < 0){
@@ -179,7 +179,7 @@ void SocketServer::handleClientMessage(int clientFD){
         else{
             std::cerr << "\nrecv() error: " << strerror(errno) << std::endl;
         }
-        handle_client_disconnect(clientFD);
+        handleClientDisconnect(clientFD);
         return;
     } 
     else{
@@ -196,7 +196,7 @@ void SocketServer::handleClientMessage(int clientFD){
 }
 
 // Helper method
-void SocketServer::handle_client_disconnect(int clientFD){
+void SocketServer::handleClientDisconnect(int clientFD){
     std::cout << std::endl << "Client " << clientFD << " disconnected" << std::endl;
     ::close(clientFD);
     
