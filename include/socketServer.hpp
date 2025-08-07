@@ -13,6 +13,7 @@
 #include <sys/ioctl.h>
 #include <iomanip>
 #include <sys/poll.h> 
+#include <vector>
 
 // ==================== Message Protocol Structures ====================
 #pragma pack(push, 1)  // Ensure no padding in structs
@@ -89,6 +90,10 @@ public:
     ~SocketClient();
     void disconnect();
     void login(const std::string &username, const std::string &password);
+
+    int getSocketFD() const { return clientFD; }
+    static constexpr int getBufferSize() { return BUFFERSIZE; }
+    void receive();
 
 private:
     static constexpr int BUFFERSIZE = 256;

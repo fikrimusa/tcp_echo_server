@@ -67,6 +67,64 @@ SocketServer::~SocketServer() {
     }
 }
 
+constexpr auto generateCRCTable() {
+    std::array<uint32_t, 256> table{};
+    for (uint32_t i = 0; i < 256; ++i) {
+        uint32_t crc = i;
+        for (int j = 0; j < 8; ++j) {
+            crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
+        }
+        table[i] = crc;
+    }
+    return table;
+}
+
+uint32_t crc32(const std::string& str) {
+    static constexpr auto crc_table = generateCRCTable();
+    uint32_t crc = 0xFFFFFFFF;
+    for (char c : str) {
+        crc = (crc >> 8) ^ crc_table[(crc ^ static_cast<uint8_t>(c)) & 0xFF];
+    }
+    return ~crc;
+}
+
+// Convert a string to 16-bit words (big-endian)
+std::vector<uint16_t> stringToWords(const std::string& str) {
+    std::vector<uint16_t> words;
+    for (size_t i = 0; i < str.size(); i += 2) {
+        uint16_t word = (i + 1 < str.size()) 
+                      ? (static_cast<uint16_t>(str[i]) << 8) | str[i + 1] 
+                      : static_cast<uint16_t>(str[i]) << 8; // Pad with 0 if odd length
+        words.push_back(word);
+    }
+    return words;
+}
+
+// Compute 16-bit checksum
+uint16_t computeChecksum(const std::vector<uint16_t>& data) {
+    uint32_t sum = 0;
+    for (uint16_t word : data) {
+        sum += word;
+        if (sum > 0xFFFF) {
+            sum = (sum & 0xFFFF) + 1; // Wrap around carry
+        }
+    }
+    return static_cast<uint16_t>(~sum); // 1's complement
+}
+
+// Linear Congruential Generator (LCG) for key generation
+uint32_t next_key(uint32_t key) {
+    return (key * 1103515245 + 12345) % 0x7FFFFFFF;
+}
+
+constexpr uint8_t calculateChecksum(std::string_view str) {
+    uint8_t sum = 0;
+    for (unsigned char c : str) {
+        sum += c;
+    }
+    return 255 - (sum % 256); // Alternative method
+}
+
 void SocketServer::run() {
     int clientFD = -1;
     
@@ -171,6 +229,7 @@ void SocketServer::handleClientMessage(int clientFD) {
     request.password[sizeof(request.password)-1] = '\0';
     request.header.msgSize = htons(header.msgSize);
 
+    //--------------- Debug --------------------
     // std::cout << "\n=== Received Login Request ==="
     //           << "\n  msgSize: " << request.header.msgSize
     //           << "\n  msgType: " << static_cast<int>(request.header.msgType)
@@ -187,6 +246,120 @@ void SocketServer::handleClientMessage(int clientFD) {
     //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(raw_data[i]) << " ";
     // }
     // std::cout << std::flush;
+    // --------------- Debug --------------------
+
+    // constexpr std::string_view expectedUsername = "testuser";
+    // constexpr std::string_view expectedPassword = "testpass";
+
+    // uint8_t usernameChecksum = calculateChecksum(expectedUsername);
+    // uint8_t passwordChecksum = calculateChecksum(expectedPassword);
+    // std::cout << " uCS: " << static_cast<int>(usernameChecksum) << std::flush;
+    // std::cout << " pCS: " << static_cast<int>(passwordChecksum) << std::flush;
+    // std::cout << " uCS: " << expectedUsername << std::flush;
+    // std::cout << " pCS: " << expectedPassword << std::flush;
+
+
+
+    // uint16_t messageSequence = 87; // Potential bug
+
+    // Generate initial key (assuming message_sequence is available from request)
+    // uint32_t initial_key = (messageSequence << 16) | (usernameChecksum << 8) | passwordChecksum;
+    std::string expectedUsername = "testuser";
+    std::string expectedPassword = "testpass";
+    std::string clientUsername = request.username; // Assume this comes from a client
+
+    // Compute CRC32 checksums
+    uint32_t serverUsernameChecksum = crc32(expectedUsername);
+    uint32_t clientUsernameChecksum = crc32(clientUsername);
+    uint32_t serverPasswordChecksum = crc32(expectedPassword);
+
+    // Output results
+    std::cout << "\nServer '" << expectedUsername << "' CRC32: 0x" 
+            << std::hex << serverUsernameChecksum << std::endl;
+    std::cout << "Client '" << clientUsername << "' CRC32: 0x" 
+            << std::hex << clientUsernameChecksum << std::endl;
+
+    bool validStatus = false;
+    // Compare checksums
+    if (serverUsernameChecksum == clientUsernameChecksum) {
+        std::cout << "Username CRC32 matches (no errors)." << std::endl;
+        validStatus = true;
+    } else {
+        std::cout << "Username CRC32 mismatch (error detected!)." << std::endl;
+        validStatus = false;
+    }
+
+    // Generate and print cipher keys
+    // uint32_t current_key = initial_key;
+    // for (int i = 0; i < 64; ++i) {
+    //     current_key = next_key(current_key);
+    //     uint8_t cipher_byte = current_key % 256;
+        
+    //     // Format output with uppercase hex and fixed width
+    //     std::cout << std::uppercase << std::hex << std::setw(2) << std::setfill('0') 
+    //               << static_cast<int>(cipher_byte) << " ";
+        
+    //     // New line every 16 bytes
+    //     if ((i + 1) % 16 == 0) {
+    //         std::cout << "\n";
+    //     }
+    // }    
+
+    //if(std::string_view(request.username) == expectedUsername && std::string_view(request.password) == expectedPassword) {
+    switch(static_cast<int>(request.header.msgType)){
+        case 0: // Got login request information
+            LoginResponse res;
+            res.header.msgSize = htons(sizeof(LoginResponse));  // Ensure network byte order
+            res.header.msgType = 1;                              // LoginResp type
+            res.header.reqId = header.reqId;                     // Match request ID
+            res.status = 1;                                      // 1 = OK, 0 = FAILED
+
+            if (send(clientFD, &res, sizeof(res), MSG_NOSIGNAL) != sizeof(res)) {
+                throw std::runtime_error("Failed to send Login Response");
+            }
+            else{
+                // Verify socket state
+                int sendBufSize = 0;
+                socklen_t len = sizeof(sendBufSize);
+                getsockopt(clientFD, SOL_SOCKET, SO_SNDBUF, &sendBufSize, &len);
+                std::cout << "Send buffer size: " << sendBufSize << " bytes\n";
+
+                // Check for errors
+                int socketError = 0;
+                getsockopt(clientFD, SOL_SOCKET, SO_ERROR, &socketError, &len);
+                if(socketError){
+                    std::cerr << "Socket error: " << strerror(socketError) << "\n";
+                } else {
+                    std::cout << "Socket healthy, data should be sent\n";
+                }   
+            }
+            // sleep(3);
+            std::cout << "\ntype0" <<std::flush;
+            break;
+        // case 1:
+        //     std::cout << "\ntype1" <<std::flush;
+        //     break;
+        // case 2:
+        //     std::cout << "\ntype2" <<std::flush;
+        //     break;        
+        default:
+            std::cout << "\tNo type" <<std::flush;
+            break;
+    }
+
+    //}
+    // else{
+    //     LoginResponse res;
+    //     res.header.msgSize = htons(sizeof(LoginResponse));  // Ensure network byte order
+    //     res.header.msgType = 1;                              // LoginResp type
+    //     res.header.reqId = header.reqId;                     // Match request ID
+    //     res.status = 0;                                      // 1 = OK, 0 = FAILED
+    //     if (send(clientFD, &res, sizeof(res), MSG_NOSIGNAL) != sizeof(res)) {
+    //         throw std::runtime_error("Failed to send Login Response");
+    //     }
+    //     handleClientDisconnect(clientFD);
+    //     return;
+    // }
 }
 
 void SocketServer::handleClientDisconnect(int clientFD){

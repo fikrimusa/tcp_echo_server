@@ -87,12 +87,65 @@ void SocketClient::disconnect(){
     }
 }
 
+void SocketClient::receive() {
+    LoginResponse res;
+    ssize_t totalReceived = 0;
+    char* buffer = reinterpret_cast<char*>(&res);
+
+    // // Loop until full response is received
+    // while (totalReceived < sizeof(res)) {
+    //     ssize_t bytesReceived = recv(clientFD, buffer + totalReceived, sizeof(res) - totalReceived, 0);
+    //     std::cout << "Received bytes: " << bytesReceived << std::endl << std::flush;
+    //     if (bytesReceived == 0) {
+    //         throw std::runtime_error("Connection closed by server");
+    //     } else if (bytesReceived == -1) {
+    //         if (errno == EAGAIN || errno == EWOULDBLOCK) {
+    //             // Handle non-blocking socket (optional)
+    //             continue;
+    //         } else {
+    //             throw std::runtime_error("recv() failed: " + std::string(strerror(errno)));
+    //         }
+    //     }
+    //     totalReceived += bytesReceived;
+    // }
+    uint8_t raw[6];
+    recv(clientFD, raw, sizeof(raw), 0);
+        std::cout << "Raw bytes: ";
+    for (int i = 0; i < 6; i++) {
+        printf("%02X ", raw[i]);
+    }
+    uint16_t msgSize = raw[0] | (raw[1] << 8);
+    uint8_t msgType = raw[2];
+    uint8_t reqId = raw[3];
+    uint16_t status = raw[4] | (raw[5] << 8);
+    std::cout << std::endl;
+    
+    std::cout << "=== Login Response ===" << "\n";
+    std::cout << "Message Size: " << msgSize << " bytes\n";
+    std::cout << "Message Type: " << msgType
+              << " (1=LoginResp)\n";
+    std::cout << "Request ID: " << reqId << "\n";
+    std::cout << "Status: " << status 
+              << " (0=FAILED, 1=OK, 30=CustomStatus)\n";
+    std::cout << "=====================" << std::endl;
+
+    // Success! Check status.
+    if (status == 1) {
+        std::cout << std::endl << "Login SUCCESS!" << std::flush;
+    
+    } else {
+        std::cout << std::endl << "Login Failed" << std::flush;
+
+    }
+}
+
+
 void SocketClient::login(const std::string &username, const std::string &password){
     LoginRequest req{};
     req.header ={
         .msgSize = htons(sizeof(LoginRequest)),
-        .msgType = 25,
-        .reqId = 2
+        .msgType = 0,
+        .reqId = 0
     };
 
     // Copy username
@@ -103,69 +156,86 @@ void SocketClient::login(const std::string &username, const std::string &passwor
     password.copy(req.password, sizeof(req.password) - 1);
     req.password[password.length() < sizeof(req.password) ? password.length() : sizeof(req.password) - 1] = '\0';
 
-    // --- Debug Output ---
-    std::cout << "\n=== Sending LoginRequest ===";
-    std::cout << "\nHeader:";
-    std::cout << "\n  msgSize: " << ntohs(req.header.msgSize);
-    std::cout << "\n  msgType: " << static_cast<int>(req.header.msgType);
-    std::cout << "\n  reqId: " << static_cast<int>(req.header.reqId);
-    std::cout << "\nCredentials:";
-    std::cout << "\n  Username: " << req.username;
-    std::cout << "\n  Password: " << req.password;
-    std::cout << "\nHex Dump:";
+    // // --- Debug Output ---
+    // std::cout << "\n=== Sending LoginRequest ===";
+    // std::cout << "\nHeader:";
+    // std::cout << "\n  msgSize: " << ntohs(req.header.msgSize);
+    // std::cout << "\n  msgType: " << static_cast<int>(req.header.msgType);
+    // std::cout << "\n  reqId: " << static_cast<int>(req.header.reqId);
+    // std::cout << "\nCredentials:";
+    // std::cout << "\n  Username: " << req.username;
+    // std::cout << "\n  Password: " << req.password;
+    // std::cout << "\nHex Dump:";
 
-    // Print raw bytes
-    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&req);
-    for(size_t i = 0; i < sizeof(req); i++){
-        if(i % 16 == 0) std::cout << "\n  ";
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(bytes[i]) << " ";
-    }
-    std::cout << "\n==========================\n";
+    // // Print raw bytes
+    // const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&req);
+    // for(size_t i = 0; i < sizeof(req); i++){
+    //     if(i % 16 == 0) std::cout << "\n  ";
+    //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(bytes[i]) << " ";
+    // }
+    // std::cout << "\n==========================\n";
 
     if(send(clientFD, &req, sizeof(req), MSG_NOSIGNAL) != sizeof(req)){
         throw std::runtime_error("Failed to send login request");
     }
     else{
-        std::cout << "Done send login request to server" << std::flush;
-        std::cout << "\nClient sent " << sizeof(req) << " bytes. Checking socket...\n";
+        // std::cout << "Done send login request to server" << std::flush;
+        // std::cout << "\nClient sent " << sizeof(req) << " bytes. Checking socket...\n";
 
-        // Verify socket state
-        int sendBufSize = 0;
-        socklen_t len = sizeof(sendBufSize);
-        getsockopt(clientFD, SOL_SOCKET, SO_SNDBUF, &sendBufSize, &len);
-        std::cout << "Send buffer size: " << sendBufSize << " bytes\n";
+        // // Verify socket state
+        // int sendBufSize = 0;
+        // socklen_t len = sizeof(sendBufSize);
+        // getsockopt(clientFD, SOL_SOCKET, SO_SNDBUF, &sendBufSize, &len);
+        // std::cout << "Send buffer size: " << sendBufSize << " bytes\n";
 
-        // Check for errors
-        int socketError = 0;
-        getsockopt(clientFD, SOL_SOCKET, SO_ERROR, &socketError, &len);
-        if(socketError){
-            std::cerr << "Socket error: " << strerror(socketError) << "\n";
-        } else {
-            std::cout << "Socket healthy, data should be sent\n";
-        }
+        // // Check for errors
+        // int socketError = 0;
+        // getsockopt(clientFD, SOL_SOCKET, SO_ERROR, &socketError, &len);
+        // if(socketError){
+        //     std::cerr << "Socket error: " << strerror(socketError) << "\n";
+        // } else {
+        //     std::cout << "Socket healthy, data should be sent\n";
+        // }
+
+        // // Receive from server
+        // std::array<char, BUFFERSIZE> buffer{};
+        // ssize_t bytes = recv(clientFD, buffer.data(), buffer.size() - 1, 0);
+        // buffer[bytes] = '\0';
+        // std::string response(buffer.data(), bytes);
+        // std::cout << std::endl << response << std::flush;
+        // if(bytes < 0){
+        //     throw std::system_error(errno, std::system_category(), "recv() failed");
+        // }
+        // if(bytes == 0){
+        //     disconnect();
+        //     throw std::runtime_error("Connection closed by server. Login failed");
+        // }    
+
     }
 }
 
 int main(){
     try{
         SocketClient client("127.0.0.1", 8080);
-        client.login("testusername","testpassword");
-
-        std::string input;
+        client.login("testuser","testpass");
+       client.receive();
+        
+        // std::string input;
         while(true){
-            std::cout << std::endl << "Enter message to send (or 'exit' to quit): ";
-            if(!std::getline(std::cin, input)){
-                break;
-            }
+            // std::cout << std::endl << "Enter message to send (or 'exit' to quit): ";
+            // if(!std::getline(std::cin, input)){
+            //     break;
+            // }
 
-            if(input == "exit"){
-                break;
-            }
+            // if(input == "exit"){
+            //     break;
+            // }
 
             try{
-                // client.send(input);
-                // auto response = client.receive();
-                // std::cout << std::endl << "Server response: " << response;
+                // sleep(3);
+                // std::string statusMessage = client.receive();
+                // std::cout << statusMessage << std::endl;
+                // ;
             }
             catch(const std::exception& e){
                 std::cerr << "Error: " << e.what() << std::endl;
