@@ -10,6 +10,9 @@
 #include <array>
 #include <system_error>
 #include <chrono>
+#include <sys/ioctl.h>
+#include <iomanip>
+#include <sys/poll.h> 
 
 // ==================== Message Protocol Structures ====================
 #pragma pack(push, 1)  // Ensure no padding in structs
@@ -22,8 +25,8 @@ struct MessageHeader{
 
 struct LoginRequest{
     MessageHeader header;
-    char username[32];  // Null-padded fixed-length string
-    char password[32];  // Null-padded fixed-length string
+    char username[32];
+    char password[32];
 };
 
 struct LoginResponse{
@@ -35,14 +38,12 @@ struct EchoRequest{
     MessageHeader header;
     uint16_t msgSize;  // Size of cipher message only
     char ciphertext[];
-    // Cipher message data follows here (variable length)
 };
 
 struct EchoResponse{
     MessageHeader header;
     uint16_t msgSize;  // Size of plain message only
     char message[];
-    // Plain message data follows here (variable length)
 };
 
 #pragma pack(pop)  // Restore default packing
@@ -86,13 +87,7 @@ class SocketClient{
 public:
     explicit SocketClient(const std::string&, uint16_t);
     ~SocketClient();
-
-    //void connect();
     void disconnect();
-    bool isConnected() const noexcept;
-    void send(const std::string&);
-    std::string receive(std::chrono::milliseconds timeout = std::chrono::seconds(5));
-
     void login(const std::string &username, const std::string &password);
 
 private:
@@ -102,8 +97,5 @@ private:
     std::string host;
     uint16_t port;
     sockaddr_in clientAddr{};
-
-    void setNonBlocking(bool enable);
-    void setTimeouts(std::chrono::milliseconds timeout);
 };
 // ====================================================================

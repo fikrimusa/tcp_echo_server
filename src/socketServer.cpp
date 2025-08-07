@@ -67,148 +67,137 @@ SocketServer::~SocketServer() {
     }
 }
 
-void SocketServer::run(){
-    nMaxFD = serverFD;
-
+void SocketServer::run() {
+    int clientFD = -1;
+    
     while(true){
+        fd_set readfds;
         FD_ZERO(&readfds);
-        FD_ZERO(&writefds);
-        FD_ZERO(&exceptfds);
-
         FD_SET(serverFD, &readfds);
-        FD_SET(serverFD, &exceptfds);
-
-        // Add all active clients
-        for(int i = 0; i < MAXCLIENT; i++){
-            if(clients[i] > 0){
-                FD_SET(clients[i], &readfds);
-                if(clients[i] > nMaxFD){
-                    nMaxFD = clients[i];
-                }
-            }
+        
+        // Only add client socket if it's valid
+        if (clientFD != -1) {
+            FD_SET(clientFD, &readfds);
         }
 
         timeval tv{.tv_sec = 1, .tv_usec = 0};
-
+        int nMaxFD = clientFD != -1 ? std::max(serverFD, clientFD) : serverFD;
+        
         int activity = select(nMaxFD + 1, &readfds, nullptr, nullptr, &tv);
-        if(activity < 0){
+        if(activity < 0 && errno != EBADF){
             throw std::system_error(errno, std::system_category(), "select() failed");
         }
-        else{
-            // Check for new connections
-            if(FD_ISSET(serverFD, &readfds)){
-                //handleNewConnection();
-                sockaddr_in clientAddr{};
-                socklen_t addrLen = sizeof(clientAddr);
 
-                int clientFD = accept(serverFD, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
-                if(clientFD < 0){
-                    throw std::system_error(errno, std::system_category(), "accept() failed");
-                }
-                else{
-                    std::cout << std::endl << "Successfully accept connection from " << clientFD;
-                }
-
-                // Find empty slot
-                bool added = false;
-                for(auto& fd : clients){
-                    if(fd == 0){
-                        fd = clientFD;
-                        FD_SET(clientFD, &readfds);
-                        nMaxFD = std::max(nMaxFD, clientFD);
-                        
-                        // Log connection
-                        char client_ip[INET_ADDRSTRLEN];
-                        inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
-                        std::cout << std::endl << "New connection: " << client_ip << " (FD: " << clientFD << ")" << std::flush;
-                        
-                        // Send welcome
-                        constexpr std::string_view welcome = "This is server. Connection established";
-                        send(clientFD, welcome.data(), welcome.size(), 0);
-                        
-                        added = true;
-                        break;
-                    }
-                }
-
-                if(!added){
-                    constexpr std::string_view msg = "Server full. Disconnecting.";
-                    send(clientFD, msg.data(), msg.size(), 0);
-                    ::close(clientFD);
-                    std::cerr << std::endl << "Rejected connection - server full";
-                }
-
-
+        // Handle new connection
+        if(FD_ISSET(serverFD, &readfds)){
+            sockaddr_in clientAddr{};
+            socklen_t addrLen = sizeof(clientAddr);
+            
+            // // Disconnect existing client if any
+            // if(clientFD != -1){
+            //     constexpr std::string_view msg = "Server is disconnecting you for new connection";
+            //     send(clientFD, msg.data(), msg.size(), 0);
+            //     handleClientDisconnect(clientFD);
+            //     clientFD = -1;
+            // }
+            
+            // Accept new connection
+            clientFD = accept(serverFD, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
+            if(clientFD < 0){
+                throw std::system_error(errno, std::system_category(), "accept() failed");
             }
+            
+            char client_ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
+            std::cout << std::endl << "New connection: " << client_ip << " (FD: " << clientFD << ")" << std::flush;
+            
+            // Send welcome message
+            constexpr std::string_view welcome = "This is server. Connection established";
+            send(clientFD, welcome.data(), welcome.size(), 0);
+        }
 
-            // Check client sockets
-            for(int i = 0; i < MAXCLIENT; i++){
-                if(clients[i] > 0 && FD_ISSET(clients[i], &readfds)){
-                    handleClientMessage(clients[i]);
-                }
-            }
+        // Handle client message
+        if (clientFD != -1 && FD_ISSET(clientFD, &readfds)) {
+            handleClientMessage(clientFD);
         }
     }
 }
 
-
-
-void SocketServer::handleClientMessage(int clientFD){
-    std::array<char, 256> buffer{};
+void SocketServer::handleClientMessage(int clientFD) {
+    // Read the header
+    MessageHeader header;
+    ssize_t bytes = recv(clientFD, &header, sizeof(header), MSG_WAITALL);
     
-    ssize_t bytes = recv(clientFD, buffer.data(), buffer.size() - 1, MSG_DONTWAIT);
-
-    if(bytes == 0){
-        // Client disconnected
-        std::cout << std::endl << "Client " << clientFD << " disconnected gracefully";
+    if(bytes <= 0){
+        if(bytes == 0){
+            std::cout << std::endl << "Client disconnected gracefully";
+        }
+        else {
+            if(errno == ECONNRESET){
+                std::cout << std::endl << "Client " << clientFD << " disconnected abruptly (connection reset)";
+            } 
+            else{
+                std::cerr << std::endl << "recv() error: " << strerror(errno);
+            }
+        }
         handleClientDisconnect(clientFD);
         return;
     }
-    else if(bytes < 0){
-        // Handle different error cases
-        if(errno == ECONNRESET){
-            std::cout << std::endl << "Client " << clientFD << " disconnected abruptly (connection reset)";
-        } 
-        else if(errno == EAGAIN || errno == EWOULDBLOCK){
-            // Shouldn't happen with blocking sockets unless you changed the mode
-            return;
-        }
-        else{
-            std::cerr << "\nrecv() error: " << strerror(errno) << std::endl;
-        }
-        handleClientDisconnect(clientFD);
-        return;
-    } 
-    else{
-        // Null-terminate and process
-        buffer[bytes] = '\0';
-        std::cout << "\nClient " << clientFD << ": " << buffer.data() << std::flush;
 
-        // Echo response
-        constexpr std::string_view response = "\nProcessed your request";
-        if(send(clientFD, response.data(), response.size(), 0) < 0){
-            throw std::system_error(errno, std::system_category(), "send() failed");
-        }
-    }    
+    // Convert network byte order
+    header.msgSize = htons(header.msgSize);
+    header.reqId = header.reqId;
+
+    // Validate header
+    if (header.msgSize != sizeof(LoginRequest)) {
+        std::cerr << std::endl << "Invalid message size: " << header.msgSize << " (expected " << sizeof(LoginRequest) << ")";
+        return;
+    }
+
+    // Read the full message
+    LoginRequest request;
+    memcpy(&request.header, &header, sizeof(header));
+    
+    // Read remaining payload (username + password)
+    bytes = recv(clientFD, &request.username, sizeof(request.username) + sizeof(request.password), MSG_WAITALL);
+    
+    if (bytes != sizeof(request.username) + sizeof(request.password)) {
+        std::cerr << std::endl << "Failed to read full payload";
+        return;
+    }
+
+    // Process the request
+    request.username[sizeof(request.username)-1] = '\0';
+    request.password[sizeof(request.password)-1] = '\0';
+    request.header.msgSize = htons(header.msgSize);
+
+    // std::cout << "\n=== Received Login Request ==="
+    //           << "\n  msgSize: " << request.header.msgSize
+    //           << "\n  msgType: " << static_cast<int>(request.header.msgType)
+    //           << "\n  reqId: " << static_cast<int>(header.reqId)
+    //           << "\n  Username: " << request.username
+    //           << "\n  Password: " << request.password << std::flush;
+
+    // // Hex dump of the entire LoginRequest
+    // std::cout << std::endl << "Hex dump (" << sizeof(LoginRequest) << " bytes):";
+
+    // const uint8_t* raw_data = reinterpret_cast<const uint8_t*>(&request);
+    // for(size_t i = 0; i < sizeof(LoginRequest); i++){
+    //     if(i % 16 == 0) std::cout << "\n  ";
+    //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(raw_data[i]) << " ";
+    // }
+    // std::cout << std::flush;
 }
 
-// Helper method
 void SocketServer::handleClientDisconnect(int clientFD){
-    std::cout << std::endl << "Client " << clientFD << " disconnected" << std::endl;
-    ::close(clientFD);
-    
-    for(auto& fd : clients){
-        if(fd == clientFD){
-            fd = 0;  // Mark slot as available
-            FD_CLR(clientFD, &readfds);
-            break;
-        }
-    }
+    if (clientFD == -1) return;
+    std::cout << std::endl << "Client " << clientFD << " disconnected" << std::flush;
+    close(clientFD);
 }
 
 int main(){
     try{
-        SocketServer server(8080);
+        SocketServer server(8080);   
         server.run();
     }
     catch(const std::exception& e){
