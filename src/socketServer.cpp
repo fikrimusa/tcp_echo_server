@@ -279,14 +279,14 @@ void SocketServer::handleClientMessage(int clientFD) {
     std::cout << "Client '" << clientUsername << "' CRC32: 0x" 
             << std::hex << clientUsernameChecksum << std::endl;
 
-    bool validStatus = false;
+    uint16_t validStatus = 0;
     // Compare checksums
     if (serverUsernameChecksum == clientUsernameChecksum) {
         std::cout << "Username CRC32 matches (no errors)." << std::endl;
-        validStatus = true;
+        validStatus = 1;
     } else {
         std::cout << "Username CRC32 mismatch (error detected!)." << std::endl;
-        validStatus = false;
+        validStatus = 0;
     }
 
     // Generate and print cipher keys
@@ -312,7 +312,7 @@ void SocketServer::handleClientMessage(int clientFD) {
             res.header.msgSize = htons(sizeof(LoginResponse));  // Ensure network byte order
             res.header.msgType = 1;                              // LoginResp type
             res.header.reqId = header.reqId;                     // Match request ID
-            res.status = 1;                                      // 1 = OK, 0 = FAILED
+            res.status = validStatus;                                      // 1 = OK, 0 = FAILED
 
             if (send(clientFD, &res, sizeof(res), MSG_NOSIGNAL) != sizeof(res)) {
                 throw std::runtime_error("Failed to send Login Response");
