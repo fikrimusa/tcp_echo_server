@@ -1,11 +1,11 @@
-#include "socketServer.hpp"
+#include "socket.hpp"
 
 SocketClient::SocketClient(const std::string &host, uint16_t port)
     : host(host), port(port){
     // Create socket
     clientFD = socket(AF_INET, SOCK_STREAM, 0);
     if(clientFD == -1){
-        throw std::system_error(errno, std::system_category(), "socket() failed");
+        throw std::system_error(errno, std::generic_category(), "socket() failed");
     }    
     else{
         std::cout << std::endl << "Successfully created socket " << clientFD;
@@ -15,7 +15,7 @@ SocketClient::SocketClient(const std::string &host, uint16_t port)
     clientAddr.sin_family = AF_INET;
     clientAddr.sin_port = htons(port);
     if(inet_pton(AF_INET, host.c_str(), &clientAddr.sin_addr) <= 0){
-        throw std::system_error(errno, std::system_category(), "Invalid address");
+        throw std::system_error(errno, std::generic_category(), "Invalid address");
     }
     else{
         std::cout << std::endl << "Client configured for " << host << ":" << port;
@@ -25,12 +25,12 @@ SocketClient::SocketClient(const std::string &host, uint16_t port)
     int flags = fcntl(clientFD, F_GETFL, 0);
     if(flags == -1){
         ::close(clientFD);
-        throw std::system_error(errno, std::system_category(), "fcntl(F_GETFL) failed");
+        throw std::system_error(errno, std::generic_category(), "fcntl(F_GETFL) failed");
     }
 
     if(fcntl(clientFD, F_SETFL, flags & ~O_NONBLOCK) == -1){
         ::close(clientFD);
-        throw std::system_error(errno, std::system_category(), "fcntl(F_SETFL) failed");
+        throw std::system_error(errno, std::generic_category(), "fcntl(F_SETFL) failed");
     }
     else{
         std::cout << std::endl << "Socket successfully set to blocking mode";
@@ -43,13 +43,13 @@ SocketClient::SocketClient(const std::string &host, uint16_t port)
         .tv_usec = static_cast<long>((timeout.count() % 1000) * 1000)
     };
     if(setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1){
-        throw std::system_error(errno, std::system_category(), "setsockopt(SO_RCVTIMEO) failed");
+        throw std::system_error(errno, std::generic_category(), "setsockopt(SO_RCVTIMEO) failed");
     }
 
     // Connect to server
     if(connect(clientFD, reinterpret_cast<sockaddr*>(&clientAddr), sizeof(clientAddr)) == -1){
         ::close(clientFD);
-        throw std::system_error(errno, std::system_category(), "connect() failed");
+        throw std::system_error(errno, std::generic_category(), "connect() failed");
     }
     else{
         connected = true;
@@ -60,7 +60,7 @@ SocketClient::SocketClient(const std::string &host, uint16_t port)
         ssize_t bytes = recv(clientFD, buffer.data(), buffer.size() - 1, 0);
         std::cout << bytes;
         if(bytes < 0){
-            throw std::system_error(errno, std::system_category(), "recv() failed");
+            throw std::system_error(errno, std::generic_category(), "recv() failed");
         }
         if(bytes == 0){
             disconnect();
@@ -145,7 +145,7 @@ void SocketClient::login(const std::string &username, const std::string &passwor
     req.header ={
         .msgSize = htons(sizeof(LoginRequest)),
         .msgType = 0,
-        .reqId = 0
+        .reqId = 30
     };
 
     // Copy username
