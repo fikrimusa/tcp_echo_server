@@ -147,14 +147,100 @@ private:
 // =================== SocketClient Class =============================
 class SocketClient{
 public:
+    /**
+     * Creates and configures a TCP client socket connection to a server.
+     * 
+     * Key Operations:
+     * 1. Socket Creation:
+     *    - Creates IPv4 TCP socket (AF_INET/SOCK_STREAM)
+     *    - Throws on failure with errno details
+     *
+     * 2. Address Configuration:
+     *    - Converts host string to network address (inet_pton)
+     *    - Sets port in network byte order (htons)
+     *
+     * 3. Socket Settings:
+     *    - Forces blocking mode (clears O_NONBLOCK)
+     *    - Configures receive timeout (SO_RCVTIMEO)
+     *
+     * 4. Connection Establishment:
+     *    - Initiates TCP handshake (connect())
+     *    - Immediately verifies connection via test receive
+     *
+     * 5. Resource Cleanup:
+     *    - Closes socket on any failure
+     *    - Sets 'connected' flag only on full success
+     *
+     */
     explicit SocketClient(const std::string&, uint16_t);
-    ~SocketClient();
-    void disconnect();
-    void login(const std::string &username, const std::string &password);
 
-    int getSocketFD() const { return clientFD; }
-    static constexpr int getBufferSize() { return BUFFERSIZE; }
-    void receive();
+    /**
+     * Ensures proper socket cleanup when client object is destroyed.
+     * 
+     * Behavior:
+     * - Delegates to disconnect() for actual cleanup
+     * - Guarantees no resource leaks
+     * - Maintains noexcept safety (indirectly via disconnect())
+     * 
+     * Important Notes:
+     * - Must not throw exceptions (matches disconnect() behavior)
+     * - Safe for stack and heap allocated objects
+     * - May block briefly during socket closure
+     * 
+     */
+    ~SocketClient();
+
+    /**
+     * Gracefully closes the client socket connection and cleans up resources.
+     * 
+     * Features:
+     * - Idempotent operation (safe to call multiple times)
+     * - Closes socket file descriptor if valid (!= -1)
+     * - Updates connection state flag
+     * - Logs disconnection event
+     * 
+     * Safety Mechanisms:
+     * - Checks for valid file descriptor before closing
+     * - Atomic state update (FD + connected flag)
+     * - Uses global scope ::close() to avoid ambiguity
+     * 
+     */
+    void disconnect();
+
+    /**
+     * Sends a login request to the server with credentials.
+     * 
+     * Protocol Details:
+     * - Uses fixed-size LoginRequest structure
+     * - Message Type: 0 (login request)
+     * - Hardcoded Request ID
+     * - Network byte order for msgSize (htons)
+     *
+     * Safety Features:
+     * - Ensures null-termination of credentials
+     * - Validates complete message transmission
+     * - Prevents buffer overflows with length checks
+     *
+     * Data Handling:
+     * - Truncates credentials exceeding max size:
+     *   - Username max: sizeof(req.username) - 1
+     *   - Password max: sizeof(req.password) - 1
+     * - Always null-terminates copied strings
+     *
+     */
+    void handleLoginRequest(const std::string &username, const std::string &password);
+
+    /**
+     * Sends a login request to the server with credentials.
+     * 
+     * Protocol Details:
+     * - Uses fixed-size LoginRequest structure
+     * - Message Type: 0 (login request)
+     * - Hardcoded Request ID
+     * - Network byte order for msgSize (htons)
+     *
+     */
+    bool handleLoginResponse();
 
 private:
     static constexpr int BUFFERSIZE = 256;

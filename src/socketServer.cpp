@@ -269,7 +269,7 @@ void SocketServer::run(){
             std::cout << std::endl << "New connection: " << client_ip << " (FD: " << clientFD << ")" << std::flush;
             
             // Send welcome message
-            constexpr std::string_view welcome = "This is server. Connection established";
+            constexpr std::string_view welcome = "From Server: Connection established";
             send(clientFD, welcome.data(), welcome.size(), 0);
         }
 
