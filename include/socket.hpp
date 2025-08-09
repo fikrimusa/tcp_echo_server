@@ -44,6 +44,24 @@ public:
      *
      */
     void run();
+
+    /**
+     * Handles incoming client messages and routes them to appropriate handlers.
+     * 
+     * This function:
+     * 1. Reads and validates message headers from client socket
+     * 2. Routes messages based on message type
+     * 3. Handles client disconnections (graceful/abrupt)
+     * 
+     * Message Handling Workflow:
+     * 1. Receives MessageHeader (msgSize, msgType, reqId)
+     * 2. Validates connection state
+     * 3. Routes using switch-case:
+     *    - Case 0: LoginRequest → LoginResponse
+     *    - Case 2: (Reserved for future EchoRequest/Response)
+     *    - Default: Unsupported message types
+     * 
+     */
     void handleClientMessage(int);
 
     /* * Handles a client login request by validating credentials against expected values.
@@ -62,8 +80,43 @@ public:
     *
     * */
     bool handleLoginRequest(int, const MessageHeader&);
-    void handleLoginResponse(int);
+
+    /**
+     * Handles and sends a login response to the client after authentication processing.
+     * 
+     * This function:
+     * 1. Constructs a login response message with authentication status
+     * 2. Provides detailed debug output of the response packet
+     * 3. Sends the response to the client socket
+     * 4. Verifies transmission success and socket health
+     * 
+     * Response Structure:
+     * - msgSize: Size of LoginResponse struct (network byte order)
+     * - msgType: Set to 1 (login response)
+     * - reqId: Mirrors the request ID from the client
+     * - status: 1 (success) or 0 (failure)
+     *
+     * Network Protocol Notes:
+     * - Uses MSG_NOSIGNAL to prevent SIGPIPE on broken pipes
+     * - Maintains network byte order for cross-platform compatibility
+     * - Ensures complete packet transmission (compares sent bytes vs expected)
+     *
+     */
+    void handleLoginResponse(int, bool, const MessageHeader&);
+
+    /**
+     * Handles client disconnection cleanup in a thread-safe manner.
+     * 
+     * Responsibilities:
+     * 1. Validates client file descriptor
+     * 2. Logs disconnection event
+     * 3. Safely closes socket connection
+     * 4. Prevents double-close errors
+     * 
+     */
     void handleClientDisconnect(int);
+
+    
     uint32_t crc32(const std::string &);
     static constexpr auto generateCRCTable();
 

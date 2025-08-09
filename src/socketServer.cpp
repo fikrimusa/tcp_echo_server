@@ -90,37 +90,48 @@ uint32_t SocketServer::crc32(const std::string& str) {
 
 void SocketServer::handleClientDisconnect(int clientFD){
     if (clientFD == -1) return;
-    std::cout << std::endl << "Client " << clientFD << " disconnected" << std::flush;
+    std::cout << std::endl << "Client " << clientFD << " disconnected" << std::endl << std::flush;
     close(clientFD);
 }
 
-// void SocketServer::handleLoginResponse(int clientFD){
-//     LoginResponse res;
-//     res.header.msgSize = htons(sizeof(LoginResponse));
-//     res.header.msgType = 1;
-//     res.header.reqId = header.reqId;
-//     res.status = validStatus;
+void SocketServer::handleLoginResponse(int clientFD, bool validStatus, const MessageHeader &header){
+    // Read the full message
+    LoginResponse response;
+    response.header.msgSize = htons(sizeof(LoginResponse));
+    response.header.msgType = 1;
+    response.header.reqId = header.reqId;
+    response.status = validStatus ? 1 : 0;
 
-//     if (send(clientFD, &res, sizeof(res), MSG_NOSIGNAL) != sizeof(res)) {
-//         throw std::runtime_error("Failed to send Login Response");
-//     }
-//     else{
-//         // Verify socket state
-//         int sendBufSize = 0;
-//         socklen_t len = sizeof(sendBufSize);
-//         getsockopt(clientFD, SOL_SOCKET, SO_SNDBUF, &sendBufSize, &len);
-//         std::cout << "Send buffer size: " << sendBufSize << " bytes\n";
+    //------------------------------------- Debug ----------------------------------
+    std::cout << "[Login Response]"
+          << "\n  Size:    " << sizeof(LoginResponse) << " bytes (network: 0x" << std::hex << response.header.msgSize << std::dec << ")"
+          << "\n  Type:    " << static_cast<int>(response.header.msgType) << " (Response)"
+          << "\n  ReqID:   " << static_cast<int>(response.header.reqId)
+          << "\n  Status:  " << (response.status ? "SUCCESS" : "FAILURE")
+          << std::endl;
+    //------------------------------------- Debug ----------------------------------
 
-//         // Check for errors
-//         int socketError = 0;
-//         getsockopt(clientFD, SOL_SOCKET, SO_ERROR, &socketError, &len);
-//         if(socketError){
-//             std::cerr << "Socket error: " << strerror(socketError) << "\n";
-//         } else {
-//             std::cout << "Socket healthy, data should be sent\n";
-//         }   
-//     }
-// };
+    if(send(clientFD, &response, sizeof(response), MSG_NOSIGNAL) != sizeof(response)){
+        throw std::runtime_error("Failed to send Login Response");
+    }
+    else{
+        // Verify socket state
+        int sendBufSize = 0;
+        socklen_t len = sizeof(sendBufSize);
+        getsockopt(clientFD, SOL_SOCKET, SO_SNDBUF, &sendBufSize, &len);
+        std::cout << "Send buffer size: " << sendBufSize << " bytes\n";
+
+        // Check for errors
+        int socketError = 0;
+        getsockopt(clientFD, SOL_SOCKET, SO_ERROR, &socketError, &len);
+        if(socketError){
+            std::cerr << "Socket error: " << strerror(socketError) << "\n";
+        }
+        else {
+            std::cout << "Socket healthy, data should be sent\n";
+        }
+    }
+};
 
 bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header){
     // Read the full message
@@ -205,8 +216,8 @@ void SocketServer::handleClientMessage(int clientFD) {
     switch(static_cast<int>(header.msgType)){
         case 0: // Handle login request and login response
             responseStatus = handleLoginRequest(clientFD, header);
-            // handleLoginResponse(clientFD, responseStatus);
-            std::cout << std::endl << "responseStatus: " << responseStatus << std::flush;
+            // std::cout << std::endl << "responseStatus: " << responseStatus << std::flush;
+            handleLoginResponse(clientFD, responseStatus, header);
             break;
         case 2:
             std::cout << "\ntype2" <<std::flush;
