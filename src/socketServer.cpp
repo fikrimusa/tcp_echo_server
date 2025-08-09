@@ -67,11 +67,11 @@ SocketServer::~SocketServer(){
     }
 }
 
-constexpr auto SocketServer::generateCRCTable() {
+constexpr auto SocketServer::generateCRCTable(){
     std::array<uint32_t, 256> table{};
-    for (uint32_t i = 0; i < 256; ++i) {
+    for(uint32_t i = 0; i < 256; ++i){
         uint32_t crc = i;
-        for (int j = 0; j < 8; ++j) {
+        for(int j = 0; j < 8; ++j){
             crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
         }
         table[i] = crc;
@@ -79,10 +79,10 @@ constexpr auto SocketServer::generateCRCTable() {
     return table;
 }
 
-uint32_t SocketServer::crc32(const std::string& str) {
+uint32_t SocketServer::crc32(const std::string& str){
     static constexpr auto crc_table = generateCRCTable();
     uint32_t crc = 0xFFFFFFFF;
-    for (char c : str) {
+    for (char c : str){
         crc = (crc >> 8) ^ crc_table[(crc ^ static_cast<uint8_t>(c)) & 0xFF];
     }
     return ~crc;

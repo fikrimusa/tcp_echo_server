@@ -116,8 +116,23 @@ public:
      */
     void handleClientDisconnect(int);
 
-    
+    /**
+     * Calculates the CRC-32 checksum of a string using the precomputed lookup table.
+     * 
+     * Features:
+     * - Uses static constexpr lookup table for O(1) per-byte calculation
+     * - Processes strings of any length
+     * - Final result is bitwise NOT (~) for standard CRC-32 output
+     * 
+     */
     uint32_t crc32(const std::string &);
+
+    /**
+     * Generates a static CRC-32 lookup table using polynomial 0xEDB88320 (standard for Ethernet, ZIP, etc.).
+     * 
+     * The table is generated at compile-time (constexpr) for optimal performance.
+     * 
+     */
     static constexpr auto generateCRCTable();
 
 private:
