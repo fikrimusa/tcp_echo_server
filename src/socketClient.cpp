@@ -176,9 +176,17 @@ void SocketClient::handleLoginRequest(const std::string &username, const std::st
 int main(){
     try{
         bool loginResponse;
-        // std::string input;
+        std::string input, username, password;
         SocketClient client("127.0.0.1", 8080);
-        client.handleLoginRequest("testuser","testpass");
+        
+        std::cout << std::endl << "Login. Please enter username and password";
+        std::cout << std::endl << "Username:";
+        std::getline(std::cin, username);
+        std::cout << "Password:";
+        std::getline(std::cin, password);
+      
+        //Correct: username = testuser, password = testpass
+        client.handleLoginRequest(username,password);
         loginResponse = client.handleLoginResponse();
         
         if(loginResponse){
