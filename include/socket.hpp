@@ -13,6 +13,8 @@
 #include <sys/ioctl.h>
 #include <iomanip>
 #include <vector>
+#include <atomic>
+#include <thread>
 #include "messageProtocol.hpp"
 
 // =================== SocketServer Class =============================
@@ -135,6 +137,17 @@ public:
      */
     static constexpr auto generateCRCTable();
 
+    /** 
+    *  Launches a background thread that monitors console input for the "exit" command, allowing graceful server shutdown without using signals.
+    *
+    *  Key Responsibilities:
+    *  1. Runs in a separate thread to avoid blocking the main server loop.
+    *  2. Listens for user input from stdin.
+    *  3. Triggers server shutdown when "exit" is entered.
+    *  4. Wakes up the main select() loop via pipe when shutdown is requested.
+    */
+    void startConsoleListener();
+
 private:
     static constexpr int MAXCLIENT = 3;
     int serverFD{-1};
@@ -142,6 +155,9 @@ private:
     std::array<int, MAXCLIENT> clients{};
     struct sockaddr_in serverAddr {};
     fd_set readfds, writefds, exceptfds;
+    std::thread consoleThread;
+    bool running;
+    int wakeupFD;
 };
 // ====================================================================
 // =================== SocketClient Class =============================

@@ -1,6 +1,13 @@
 #include "socket.hpp"
 
 SocketServer::SocketServer(uint16_t port){
+    // Create wakeup pipe
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        throw std::system_error(errno, std::generic_category(), "pipe() failed");
+    }
+    wakeupFD = pipefd[0];
+
     // Create socket
     serverFD = ::socket(AF_INET, SOCK_STREAM, 0);
     if(serverFD == -1){
@@ -61,10 +68,31 @@ SocketServer::SocketServer(uint16_t port){
 }
 
 SocketServer::~SocketServer(){
+    running = false;
+    if(consoleThread.joinable()){
+        consoleThread.join();
+    }
+
     if(serverFD != -1){
         close(serverFD);
-        std::cout << std::endl << "Server socket " << serverFD << " closed" << std::endl;
+        std::cout << "Server socket " << serverFD << " closed" << std::endl;
     }
+}
+
+void SocketServer::startConsoleListener(){
+    consoleThread = std::thread([this]() {
+        std::string input;
+        while (running) {
+            std::getline(std::cin, input);
+            if(input == "exit"){
+                running = false;
+                // Write to pipe to wake up select()
+                char dummy = 0;
+                write(wakeupFD + 1, &dummy, 1);
+                break;
+            }
+        }
+    });
 }
 
 constexpr auto SocketServer::generateCRCTable(){
@@ -192,7 +220,7 @@ void SocketServer::handleClientMessage(int clientFD) {
     
     if(bytes <= 0){
         if(bytes == 0){
-            std::cout << std::endl << "Client disconnected gracefully";
+            std::cout << std::endl << "Client disconnected gracefully" << std::flush;
         }
         else {
             if(errno == ECONNRESET){
@@ -202,7 +230,7 @@ void SocketServer::handleClientMessage(int clientFD) {
                 std::cerr << std::endl << "recv() error: " << strerror(errno);
             }
         }
-        handleClientDisconnect(clientFD);
+        //handleClientDisconnect(clientFD);
         return;
     }
 
@@ -228,27 +256,46 @@ void SocketServer::handleClientMessage(int clientFD) {
     }
 }
 
-void SocketServer::run(){
-    int clientFD{-1};
+void SocketServer::run() {
+    running = true;
+    startConsoleListener();
+
+    int clientFD = -1;
     
-    while(true){
+    while(running){
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(serverFD, &readfds);
+        FD_SET(wakeupFD, &readfds);
         
         // Conditionally add client socket to monitoring set
-        if (clientFD != -1) {
+        if(clientFD != -1){
             FD_SET(clientFD, &readfds);
         }
 
-        // Set 1s timeout for select() to prevent blocking indefinitely
-        timeval tv{.tv_sec = 1, .tv_usec = 0};
-        
+        timeval tv{.tv_sec = 0, .tv_usec = 100000};
+
         // Dynamically adjust this based on active connections.
-        int nMaxFD = clientFD != -1 ? std::max(serverFD, clientFD) : serverFD;
+        int maxFD = std::max(serverFD, wakeupFD);
+        if(clientFD != -1){
+            maxFD = std::max(maxFD, clientFD);
+        }
         
-        int activity = select(nMaxFD + 1, &readfds, nullptr, nullptr, &tv);
-        if(activity < 0 && errno != EBADF){
+        int activity = select(maxFD + 1, &readfds, nullptr, nullptr, &tv);
+        
+        // Check wakeup pipe first
+        if(FD_ISSET(wakeupFD, &readfds)){
+            char dummy;
+            read(wakeupFD, &dummy, 1);
+            running = false;
+            break;
+        }
+
+        if(!running) break;
+
+        if(activity < 0){
+            if(errno == EINTR) continue;  // Interrupted system call
+            if(errno == EBADF) continue;  // Bad file descriptor
             throw std::system_error(errno, std::generic_category(), "select() failed");
         }
 
@@ -256,13 +303,14 @@ void SocketServer::run(){
         if(FD_ISSET(serverFD, &readfds)){
             sockaddr_in clientAddr{};
             socklen_t addrLen = sizeof(clientAddr);
-                        
+
             // Accept the pending connection
             clientFD = accept(serverFD, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
             if(clientFD < 0){
+                if(errno == EWOULDBLOCK || errno == EAGAIN) continue;
                 throw std::system_error(errno, std::generic_category(), "accept() failed");
             }
-            
+
             // Log connection details
             char client_ip[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
@@ -270,24 +318,51 @@ void SocketServer::run(){
             
             // Send welcome message
             constexpr std::string_view welcome = "From Server: Connection established";
-            send(clientFD, welcome.data(), welcome.size(), 0);
+            if(send(clientFD, welcome.data(), welcome.size(), MSG_NOSIGNAL) == -1) {
+                handleClientDisconnect(clientFD);
+                clientFD = -1;
+                continue;
+            }
         }
 
-        // Existing client communication
-        if (clientFD != -1 && FD_ISSET(clientFD, &readfds)) {
-            handleClientMessage(clientFD); // Delegate message processing
+        // Handle existing client communication
+        if(clientFD != -1 && FD_ISSET(clientFD, &readfds)){
+            try {
+                handleClientMessage(clientFD);
+            } catch(const std::exception& e) {
+                std::cerr << std::endl << "Client handling error: " << e.what();
+                handleClientDisconnect(clientFD);
+                clientFD = -1;
+                continue;
+            }
+            
+            // Check if client disconnected
+            char buf;
+            int ret = recv(clientFD, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
+            if(ret == 0 || (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+                handleClientDisconnect(clientFD);
+                clientFD = -1;
+            }
         }
     }
+
+    // Cleanup
+    if(clientFD != -1) {
+        handleClientDisconnect(clientFD);
+    }
+    consoleThread.join();
 }
 
 int main(){
     try{
-        SocketServer server(8080);   
+        SocketServer server(8080);
+        std::cout << "Type 'exit' and press Enter to shutdown" << std::endl;
         server.run();
+        std::cout << "Server shutdown" << std::endl;
+        return EXIT_SUCCESS;
     }
     catch(const std::exception& e){
         std::cerr << std::endl << "Server error: " << e.what() << std::endl;
         return EXIT_FAILURE;
     }
-    return EXIT_SUCCESS;
 }
