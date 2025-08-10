@@ -15,7 +15,15 @@
 #include <vector>
 #include <atomic>
 #include <thread>
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <filesystem>
+#include <openssl/evp.h>
+#include <sstream>
 #include "messageProtocol.hpp"
+
+namespace fs = std::filesystem;
+using json = nlohmann::json;
 
 // =================== SocketServer Class =============================
 class SocketServer{

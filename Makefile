@@ -2,7 +2,7 @@
 CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude -g
 LDFLAGS := -pthread
-LDLIBS := -lstdc++
+LDLIBS := -lstdc++ -lcrypto
 
 # Targets
 SERVER_TARGET := bin/tcp_server

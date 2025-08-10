@@ -79,6 +79,32 @@ SocketServer::~SocketServer(){
     }
 }
 
+std::string sha256(const std::string& str) {
+    EVP_MD_CTX* context = EVP_MD_CTX_new();
+    const EVP_MD* algorithm = EVP_sha256();
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int lengthOfHash = 0;
+
+    if(!context){
+        throw std::runtime_error("Failed to create EVP context");
+    }
+
+    if(EVP_DigestInit_ex(context, algorithm, nullptr) != 1 ||
+        EVP_DigestUpdate(context, str.c_str(), str.size()) != 1 ||
+        EVP_DigestFinal_ex(context, hash, &lengthOfHash) != 1) {
+        EVP_MD_CTX_free(context);
+        throw std::runtime_error("SHA256 calculation failed");
+    }
+
+    EVP_MD_CTX_free(context);
+
+    std::stringstream ss;
+    for(unsigned int i = 0; i < lengthOfHash; i++){
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
+
 void SocketServer::startConsoleListener(){
     consoleThread = std::thread([this]() {
         std::string input;
@@ -175,17 +201,45 @@ bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header)
     // Process the request
     request.username[sizeof(request.username)-1] = '\0';
     request.password[sizeof(request.password)-1] = '\0';
-    
-    std::string expectedUsername = "testuser";
-    std::string expectedPassword = "testpass";
+    fs::path jsonPath = "storage.json";
+
+    // Verify file exists
+    if(!fs::exists(jsonPath)) {
+        throw std::runtime_error("File not found: " + jsonPath.string());
+    }
+    else{
+        std::cout << std::endl << "Found file json";
+    }
+
+    // Open the file and parse with error handling
+    std::ifstream jsonFile(jsonPath);
+    json data = json::parse(jsonFile);
+
+    std::string expectedUsername;
+    std::string expectedPassword;
+
+    // Access and print data
+    for(const auto& user : data["users"]){
+        expectedUsername = user["username"];
+        expectedPassword = user["password_hash"];
+    }
+
     std::string clientUsername = request.username;
     std::string clientPassword = request.password;
+    std::string passwordHashed = sha256(clientPassword);
+    bool passValid{false};
+    
+    if(expectedPassword == passwordHashed){
+        std::cout << std::endl << "Passed sha256";
+        passValid = true;
+    }
+    else{
+        passValid = false;
+    }
 
     // Compute CRC32 checksums
     uint32_t serverUsernameChecksum = crc32(expectedUsername);
     uint32_t clientUsernameChecksum = crc32(clientUsername);
-    uint32_t serverPasswordChecksum = crc32(expectedPassword);
-    uint32_t clientPasswordChecksum = crc32(clientPassword);
 
     //----------------------------------------------------- Debug -----------------------------------------------------
     // std::cout << std::endl << "ServerUsername: '" << expectedUsername << "' CRC32: 0x" << std::hex << serverUsernameChecksum;
@@ -195,7 +249,7 @@ bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header)
     //----------------------------------------------------- Debug -----------------------------------------------------
 
     // Compare checksums
-    if((serverUsernameChecksum == clientUsernameChecksum) && (serverPasswordChecksum == clientPasswordChecksum)){
+    if((serverUsernameChecksum == clientUsernameChecksum) && (passValid == true)){
         std::cout << std::endl << "Success: Username and password matches" << std::endl;
         return true;
     }
@@ -203,7 +257,7 @@ bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header)
         std::cout << std::endl << "Failed: Username mismatch" << std::endl;
         return false;
     }
-    else if((serverPasswordChecksum != clientPasswordChecksum) ){
+    else if((passValid == false) ){
         std::cout << std::endl << "Failed: Password mismatch" << std::endl;
         return false;
     }
