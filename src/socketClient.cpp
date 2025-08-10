@@ -185,26 +185,23 @@ int main(){
         std::cout << "Password:";
         std::getline(std::cin, password);
       
-        //Correct: username = testuser, password = testpass
         client.handleLoginRequest(username,password);
         loginResponse = client.handleLoginResponse();
         
         if(loginResponse){
             while(true){
-                // std::cout << std::endl << "Enter message to send (or 'exit' to quit): ";
-                // if(!std::getline(std::cin, input)){
-                //     break;
-                // }
+                std::cout << std::endl << "Enter message to send (or 'exit' to quit): ";
+                if(!std::getline(std::cin, input)){
+                    break;
+                }
 
-                // if(input == "exit"){
-                //     break;
-                // }
+                if(input == "exit"){
+                    break;
+                }
 
                 try{
-                    // sleep(3);
                     // std::string statusMessage = client.receive();
                     // std::cout << statusMessage << std::endl;
-                    // ;
                 }
                 catch(const std::exception& e){
                     std::cerr << "Error: " << e.what() << std::endl;

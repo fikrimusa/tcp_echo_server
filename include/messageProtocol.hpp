@@ -3,9 +3,9 @@
 #pragma pack(push, 1)  // Ensure no padding in structs
 
 struct MessageHeader{
-    uint16_t msgSize;  // Total message size (including header)
+    uint16_t msgSize; 
     uint8_t msgType;   // 0=LoginReq, 1=LoginResp, 2=EchoReq
-    uint8_t reqId;     // Sequence number
+    uint8_t reqId;
 };
 
 struct LoginRequest{
@@ -21,13 +21,13 @@ struct LoginResponse{
 
 struct EchoRequest{
     MessageHeader header;
-    uint16_t msgSize;  // Size of cipher message only
+    uint16_t msgSize;
     char ciphertext[];
 };
 
 struct EchoResponse{
     MessageHeader header;
-    uint16_t msgSize;  // Size of plain message only
+    uint16_t msgSize;
     char message[];
 };
 
