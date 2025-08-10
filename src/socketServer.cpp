@@ -230,7 +230,6 @@ void SocketServer::handleClientMessage(int clientFD) {
                 std::cerr << std::endl << "recv() error: " << strerror(errno);
             }
         }
-        //handleClientDisconnect(clientFD);
         return;
     }
 
