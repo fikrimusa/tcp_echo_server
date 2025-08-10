@@ -366,6 +366,8 @@ void SocketServer::run() {
                 throw std::system_error(errno, std::generic_category(), "accept() failed");
             }
 
+            uint8_t currentReqID = generateUniqueReqID();
+    
             // Log connection details
             char client_ip[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
@@ -373,7 +375,7 @@ void SocketServer::run() {
             
             // Send welcome message
             constexpr std::string_view welcome = "From Server: Connection established";
-            if(send(clientFD, welcome.data(), welcome.size(), MSG_NOSIGNAL) == -1) {
+            if(send(clientFD, &currentReqID, sizeof(currentReqID), MSG_NOSIGNAL) == -1) {
                 handleClientDisconnect(clientFD);
                 clientFD = -1;
                 continue;

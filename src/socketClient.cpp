@@ -59,20 +59,19 @@ SocketClient::SocketClient(const std::string &host, uint16_t port)
         std::cout << std::endl << "Success: Connected to server at " << host << ":" << port;
     
         // Receive from server
-        std::array<char, BUFFERSIZE> buffer{};
-        ssize_t bytes = ::recv(clientFD, buffer.data(), buffer.size() - 1, 0);
-        // std::cout << std::endl << bytes;
+        uint8_t sReqID;
+        ssize_t bytes = ::recv(clientFD, &sReqID, sizeof(sReqID), 0);
+        // std::cout << std::endl << "Bytes: " << bytes;
         if(bytes < 0){
             throw std::system_error(errno, std::generic_category(), "recv() failed");
         }
         if(bytes == 0){
             disconnect();
             throw std::runtime_error("Connection closed by server");
-        }    
-        buffer[bytes] = '\0';
-
-        std::string response(buffer.data(), bytes);
-        std::cout << std::endl << response << std::endl << std::flush;
+        }
+        // std::cout << std::endl << static_cast<int>(sReqID) << std::endl << std::flush;
+        std::cout << std::endl;
+        this->currentReqID = sReqID;
     }
 }
 
@@ -135,7 +134,7 @@ void SocketClient::handleLoginRequest(const std::string &username, const std::st
     LoginRequest req{};
     req.header.msgSize= htons(sizeof(LoginRequest));
     req.header.msgType = 0;
-    req.header.reqId = 30;
+    req.header.reqId = this->currentReqID;
 
     // Safe string copying with null termination
     username.copy(req.username, sizeof(req.username) - 1);
@@ -183,7 +182,7 @@ int main(){
         std::string input, username, password;
         SocketClient client("127.0.0.1", 8080);
         
-        std::cout << std::endl << "Login. Please enter username and password";
+        std::cout << std::endl << "Login: Please enter username and password:-";
         std::cout << std::endl << "Username:";
         std::getline(std::cin, username);
         std::cout << "Password:";

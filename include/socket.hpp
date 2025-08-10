@@ -156,6 +156,10 @@ public:
     */
     void startConsoleListener();
 
+    uint8_t generateUniqueReqID() {
+        return globalReqID.fetch_add(1, std::memory_order_relaxed);
+    }
+
 private:
     static constexpr int MAXCLIENT = 3;
     int serverFD{-1};
@@ -166,6 +170,7 @@ private:
     std::thread consoleThread;
     bool running;
     int wakeupFD;
+    std::atomic<uint32_t> globalReqID{0};
 };
 // ====================================================================
 // =================== SocketClient Class =============================
@@ -266,6 +271,8 @@ public:
      */
     bool handleLoginResponse();
 
+    uint8_t getCurrentReqID() const { return currentReqID; }
+
 private:
     static constexpr int BUFFERSIZE = 256;
     int clientFD{-1};
@@ -273,5 +280,6 @@ private:
     std::string host;
     uint16_t port;
     sockaddr_in clientAddr{};
+    uint8_t currentReqID;
 };
 // ====================================================================
