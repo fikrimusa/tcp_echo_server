@@ -157,12 +157,14 @@ void SocketServer::handleLoginResponse(int clientFD, bool validStatus, const Mes
     response.status = validStatus ? 1 : 0;
 
     //------------------------------------- Debug ----------------------------------
-    std::cout << "[Login Response]"
-          << "\n  Size:    " << sizeof(LoginResponse) << " bytes (network: 0x" << std::hex << response.header.msgSize << std::dec << ")"
-          << "\n  Type:    " << static_cast<int>(response.header.msgType) << " (Response)"
+    std::cout << std::endl << "---------------------------------";
+    std::cout << "\n[Sending Login Response to client]"
+          << "\n  Size:    " << sizeof(LoginResponse)
+          << "\n  Type:    " << static_cast<int>(response.header.msgType)
           << "\n  ReqID:   " << static_cast<int>(response.header.reqId)
           << "\n  Status:  " << (response.status ? "SUCCESS" : "FAILURE")
           << std::endl;
+    std::cout << "---------------------------------";
     //------------------------------------- Debug ----------------------------------
 
     if(send(clientFD, &response, sizeof(response), MSG_NOSIGNAL) != sizeof(response)){
@@ -173,7 +175,7 @@ void SocketServer::handleLoginResponse(int clientFD, bool validStatus, const Mes
         int sendBufSize = 0;
         socklen_t len = sizeof(sendBufSize);
         getsockopt(clientFD, SOL_SOCKET, SO_SNDBUF, &sendBufSize, &len);
-        std::cout << "Send buffer size: " << sendBufSize << " bytes\n";
+        std::cout << std::endl << "Send buffer size: " << sendBufSize << " bytes\n";
 
         // Check for errors
         int socketError = 0;
@@ -208,7 +210,7 @@ bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header)
         throw std::runtime_error("File not found: " + jsonPath.string());
     }
     else{
-        std::cout << std::endl << "Found file json";
+        // std::cout << std::endl << "Found file json";
     }
 
     // Open the file and parse with error handling

@@ -106,17 +106,19 @@ bool SocketClient::handleLoginResponse(){
     uint8_t reqId = raw[3];
     uint16_t status = ntohs(*reinterpret_cast<uint16_t*>(&raw[4]));
 
-    std::cout << "Raw bytes: ";
-    for (int i = 0; i < 6; i++) {
-        printf("%02X ", raw[i]);
-    }
+    // std::cout << "Raw bytes: ";
+    // for (int i = 0; i < 6; i++) {
+    //     printf("%02X ", raw[i]);
+    // }
 
-    std::cout << "\n[Login Response]"
+    std::cout << std::endl << "---------------------------------";
+    std::cout << "\n[Received Login Response from server]"
               << "\n  Size:   " << msgSize << " bytes"
               << "\n  Type:   " << static_cast<int>(msgType)
               << "\n  ReqID:  " << static_cast<int>(reqId)
               << "\n  Status: " << (status == 0x0100 ? "SUCCESS" : "FAILURE") 
               << std::endl;
+    std::cout << "---------------------------------";
 
     if(status == 0x0100){
         std::cout << std::endl << "Login Success!" << std::endl;
@@ -142,13 +144,15 @@ void SocketClient::handleLoginRequest(const std::string &username, const std::st
     req.password[password.length() < sizeof(req.password) ? password.length() : sizeof(req.password) - 1] = '\0';
 
     //------------------------------------- Debug ----------------------------------
-    std::cout << "[Login Request]"
+    std::cout << std::endl << "---------------------------------";
+    std::cout << "\n[Sending Login Request to server]"
               << "\n  Size:      " << sizeof(LoginRequest) << " bytes"
-              << "\n  Type:      " << static_cast<int>(req.header.msgType) << " (Login)"
-              << "\n  RequestID: " << req.header.reqId
+              << "\n  Type:      " << static_cast<int>(req.header.msgType)
+              << "\n  RequestID: " << static_cast<int>(req.header.reqId)
               << "\n  Username:  '" << req.username << "'"
               << "\n  Password:  '" << std::string(req.password).replace(1, std::string::npos, strlen(req.password)-1, '*') << "'"
               << std::endl;
+    std::cout << "---------------------------------";
    //------------------------------------- Debug ----------------------------------
 
     if(send(clientFD, &req, sizeof(req), MSG_NOSIGNAL) != sizeof(req)){
@@ -159,16 +163,16 @@ void SocketClient::handleLoginRequest(const std::string &username, const std::st
         int sendBufSize = 0;
         socklen_t len = sizeof(sendBufSize);
         getsockopt(clientFD, SOL_SOCKET, SO_SNDBUF, &sendBufSize, &len);
-        std::cout << "Send buffer size: " << sendBufSize << " bytes\n";
+        std::cout << std::endl << "Send buffer size: " << sendBufSize << " bytes" << std::endl;
 
         // Check for errors
         int socketError = 0;
         getsockopt(clientFD, SOL_SOCKET, SO_ERROR, &socketError, &len);
         if(socketError){
-            std::cerr << "Socket error: " << strerror(socketError) << "\n";
+            std::cerr << "Socket error: " << strerror(socketError) << std::endl;
         }
         else {
-            std::cout << "Socket healthy, data should be sent\n";
+            std::cout << "Socket healthy, data should be sent" << std::endl;
         }
     }
 }
