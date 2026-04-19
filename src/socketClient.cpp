@@ -149,7 +149,7 @@ void SocketClient::startReceiveLoop(){
                 msg.text[sizeof(msg.text) - 1]         = '\0';
 
                 std::lock_guard<std::mutex> lock(printMtx);
-                std::cout << "\n[" << msg.username << "]: " << msg.text << std::flush;
+                std::cout << "\n[" << msg.username << "]: " << msg.text << "\n> " << std::flush;
             }
         }
     });
@@ -173,6 +173,7 @@ int main(){
             std::cout << "Type a message and press Enter. Type 'exit' to quit.\n";
 
             while(true){
+                std::cout << "> " << std::flush;
                 if(!std::getline(std::cin, input) || input == "exit") break;
                 if(!input.empty()) client.sendChatMessage(input);
             }
