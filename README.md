@@ -90,6 +90,33 @@ echo -n "yourpassword" | sha256sum
 
 Then add the entry to `storage.json`.
 
+## Roadmap / Production Grade
+
+Things that would be needed to take this to a production-ready system:
+
+**Security**
+- TLS/SSL encryption — currently messages are sent in plaintext over the network; wrap the socket layer with OpenSSL or use a library like `libtls`
+- Salted password hashing — replace plain SHA-256 with bcrypt or Argon2 to protect against rainbow table attacks
+- Session tokens — issue a signed token after login instead of trusting the persistent connection state
+- Rate limiting — prevent brute-force login attempts
+
+**Scalability**
+- Replace `select()` with `epoll` — `select()` has an FD limit (`FD_SETSIZE`, typically 1024); `epoll` scales to thousands of connections
+- Thread pool — spawn a worker thread per client or use a fixed pool instead of handling all clients on one thread
+- Dynamic client limit — replace the hardcoded `MAXCLIENT = 3` with a configurable value
+- Persistent message storage — log chat history to a database so clients can catch up on missed messages
+
+**Reliability**
+- Reconnection logic — clients should attempt to reconnect automatically on disconnect
+- Heartbeat / keepalive — detect dead connections that didn't close cleanly
+- Graceful server drain — notify clients before shutdown instead of abruptly closing connections
+
+**Usability**
+- Chat rooms / channels — let clients join named rooms instead of a single global broadcast
+- User registration — add a sign-up flow rather than manually editing `storage.json`
+- Timestamps on messages
+- TUI — replace the raw terminal with a proper split-pane interface (e.g. using ncurses) so incoming messages don't interrupt typing
+
 ## Project Structure
 
 ```
@@ -103,3 +130,7 @@ Then add the entry to `storage.json`.
 ├── storage.json              # User credentials
 └── Makefile
 ```
+
+## License
+
+MIT License — see [LICENSE](LICENSE).
