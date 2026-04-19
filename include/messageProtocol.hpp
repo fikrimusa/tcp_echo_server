@@ -3,7 +3,7 @@
 #pragma pack(push, 1)  // Ensure no padding in structs
 
 struct MessageHeader{
-    uint16_t msgSize; 
+    uint16_t msgSize;
     uint8_t msgType;   // 0=LoginReq, 1=LoginResp, 2=EchoReq
     uint8_t reqId;
 };
@@ -11,7 +11,7 @@ struct MessageHeader{
 struct LoginRequest{
     MessageHeader header;
     char username[32];
-    char password[32];
+    char password[65];  // SHA256 hex (64 chars + null terminator)
 };
 
 struct LoginResponse{
@@ -31,4 +31,4 @@ struct EchoResponse{
     char message[];
 };
 
-#pragma pack(pop)  // Restore default packing
+#pragma pack(pop)

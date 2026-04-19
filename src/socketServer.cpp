@@ -1,120 +1,80 @@
 #include "socket.hpp"
 
 SocketServer::SocketServer(uint16_t port){
-    // Create wakeup pipe
     int pipefd[2];
-    if (pipe(pipefd) == -1) {
+    if(pipe(pipefd) == -1)
         throw std::system_error(errno, std::generic_category(), "pipe() failed");
-    }
-    wakeupFD = pipefd[0];
+    wakeupReadFD  = pipefd[0];
+    wakeupWriteFD = pipefd[1];
 
-    // Create socket
     serverFD = ::socket(AF_INET, SOCK_STREAM, 0);
     if(serverFD == -1){
+        close(wakeupReadFD); close(wakeupWriteFD);
         throw std::system_error(errno, std::generic_category(), "socket() failed");
     }
-    else{
-        std::cout << std::endl << "Success: Created socket " << serverFD;
-    }
-    
-    // Server configurations
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(port);
+    std::cout << "\nSuccess: Created socket " << serverFD;
+
+    serverAddr.sin_family      = AF_INET;
+    serverAddr.sin_port        = htons(port);
     serverAddr.sin_addr.s_addr = INADDR_ANY;
 
-    // Set socket options
     const int reuse = 1;
     if(::setsockopt(serverFD, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse))){
-        ::close(serverFD);
+        ::close(serverFD); close(wakeupReadFD); close(wakeupWriteFD);
         throw std::system_error(errno, std::generic_category(), "setsockopt() failed");
     }
-    else{
-        std::cout << std::endl << "Success: Set socket options";
-    }
+    std::cout << "\nSuccess: Set socket options";
 
-    // Set socket to blocking mode
     int flags = ::fcntl(serverFD, F_GETFL, 0);
     if(flags == -1){
-        ::close(serverFD);
+        ::close(serverFD); close(wakeupReadFD); close(wakeupWriteFD);
         throw std::system_error(errno, std::generic_category(), "fcntl(F_GETFL) failed");
     }
-
     if(::fcntl(serverFD, F_SETFL, flags & ~O_NONBLOCK) == -1){
-        ::close(serverFD);
+        ::close(serverFD); close(wakeupReadFD); close(wakeupWriteFD);
         throw std::system_error(errno, std::generic_category(), "fcntl(F_SETFL) failed");
     }
-    else{
-        std::cout << std::endl << "Success: Set to blocking mode";
-    }
-    
-    // Bind
+    std::cout << "\nSuccess: Set to blocking mode";
+
     if(::bind(serverFD, reinterpret_cast<const sockaddr*>(&serverAddr), sizeof(serverAddr)) == -1){
-        ::close(serverFD);
+        ::close(serverFD); close(wakeupReadFD); close(wakeupWriteFD);
         throw std::system_error(errno, std::generic_category(), "bind() failed");
     }
-    else{
-        std::cout << std::endl << "Success: Bind";
-    }
+    std::cout << "\nSuccess: Bind";
 
-    // Listen
     if(::listen(serverFD, 5)){
-        ::close(serverFD);
+        ::close(serverFD); close(wakeupReadFD); close(wakeupWriteFD);
         throw std::system_error(errno, std::generic_category(), "listen() failed");
     }
-    else{
-        std::cout << std::endl << "Success: Listen ";
-    }
-    std::cout << std::endl << std::endl << "Server listening on port " << port << "..." << std::endl << std::endl;
+    std::cout << "\nSuccess: Listen";
+
+    clients.fill(-1);
+    std::cout << "\n\nServer listening on port " << port << "...\n\n";
 }
 
 SocketServer::~SocketServer(){
     running = false;
-    if(consoleThread.joinable()){
+    if(wakeupWriteFD != -1){
+        char dummy = 0;
+        write(wakeupWriteFD, &dummy, 1);
+    }
+    if(consoleThread.joinable())
         consoleThread.join();
-    }
-
-    if(serverFD != -1){
+    if(serverFD != -1)
         close(serverFD);
-        std::cout << "Server socket " << serverFD << " closed" << std::endl;
-    }
-}
-
-std::string sha256(const std::string& str) {
-    EVP_MD_CTX* context = EVP_MD_CTX_new();
-    const EVP_MD* algorithm = EVP_sha256();
-    unsigned char hash[EVP_MAX_MD_SIZE];
-    unsigned int lengthOfHash = 0;
-
-    if(!context){
-        throw std::runtime_error("Failed to create EVP context");
-    }
-
-    if(EVP_DigestInit_ex(context, algorithm, nullptr) != 1 ||
-        EVP_DigestUpdate(context, str.c_str(), str.size()) != 1 ||
-        EVP_DigestFinal_ex(context, hash, &lengthOfHash) != 1) {
-        EVP_MD_CTX_free(context);
-        throw std::runtime_error("SHA256 calculation failed");
-    }
-
-    EVP_MD_CTX_free(context);
-
-    std::stringstream ss;
-    for(unsigned int i = 0; i < lengthOfHash; i++){
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-    }
-    return ss.str();
+    if(wakeupReadFD  != -1) close(wakeupReadFD);
+    if(wakeupWriteFD != -1) close(wakeupWriteFD);
 }
 
 void SocketServer::startConsoleListener(){
     consoleThread = std::thread([this]() {
         std::string input;
-        while (running) {
+        while(running){
             std::getline(std::cin, input);
             if(input == "exit"){
                 running = false;
-                // Write to pipe to wake up select()
                 char dummy = 0;
-                write(wakeupFD + 1, &dummy, 1);
+                write(wakeupWriteFD, &dummy, 1);
                 break;
             }
         }
@@ -125,9 +85,8 @@ constexpr auto SocketServer::generateCRCTable(){
     std::array<uint32_t, 256> table{};
     for(uint32_t i = 0; i < 256; ++i){
         uint32_t crc = i;
-        for(int j = 0; j < 8; ++j){
+        for(int j = 0; j < 8; ++j)
             crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
-        }
         table[i] = crc;
     }
     return table;
@@ -136,177 +95,98 @@ constexpr auto SocketServer::generateCRCTable(){
 uint32_t SocketServer::crc32(const std::string& str){
     static constexpr auto crc_table = generateCRCTable();
     uint32_t crc = 0xFFFFFFFF;
-    for (char c : str){
+    for(char c : str)
         crc = (crc >> 8) ^ crc_table[(crc ^ static_cast<uint8_t>(c)) & 0xFF];
-    }
     return ~crc;
 }
 
 void SocketServer::handleClientDisconnect(int clientFD){
-    if (clientFD == -1) return;
-    std::cout << std::endl << "Client " << clientFD << " disconnected" << std::endl << std::flush;
+    if(clientFD == -1) return;
+    std::cout << "\nClient " << clientFD << " disconnected\n" << std::flush;
     close(clientFD);
 }
 
-void SocketServer::handleLoginResponse(int clientFD, bool validStatus, const MessageHeader &header){
-    // Read the full message
-    LoginResponse response;
+void SocketServer::handleLoginResponse(int clientFD, bool validStatus, const MessageHeader& header){
+    LoginResponse response{};
     response.header.msgSize = htons(sizeof(LoginResponse));
     response.header.msgType = 1;
-    response.header.reqId = header.reqId;
-    response.status = validStatus ? 1 : 0;
+    response.header.reqId   = header.reqId;
+    response.status         = htons(validStatus ? 1 : 0);
 
-    //------------------------------------- Debug ----------------------------------
-    std::cout << std::endl << "---------------------------------";
-    std::cout << "\n[Sending Login Response to client]"
-          << "\n  Size:    " << sizeof(LoginResponse)
-          << "\n  Type:    " << static_cast<int>(response.header.msgType)
-          << "\n  ReqID:   " << static_cast<int>(response.header.reqId)
-          << "\n  Status:  " << (response.status ? "SUCCESS" : "FAILURE")
-          << std::endl;
-    std::cout << "---------------------------------";
-    //------------------------------------- Debug ----------------------------------
+    std::cout << "\n---------------------------------"
+              << "\n[Sending Login Response to client]"
+              << "\n  Size:   " << sizeof(LoginResponse)
+              << "\n  Type:   " << static_cast<int>(response.header.msgType)
+              << "\n  ReqID:  " << static_cast<int>(response.header.reqId)
+              << "\n  Status: " << (validStatus ? "SUCCESS" : "FAILURE")
+              << "\n---------------------------------";
 
-    if(send(clientFD, &response, sizeof(response), MSG_NOSIGNAL) != sizeof(response)){
+    if(send(clientFD, &response, sizeof(response), MSG_NOSIGNAL) != sizeof(response))
         throw std::runtime_error("Failed to send Login Response");
-    }
-    else{
-        // Verify socket state
-        int sendBufSize = 0;
-        socklen_t len = sizeof(sendBufSize);
-        getsockopt(clientFD, SOL_SOCKET, SO_SNDBUF, &sendBufSize, &len);
-        std::cout << std::endl << "Send buffer size: " << sendBufSize << " bytes\n";
-
-        // Check for errors
-        int socketError = 0;
-        getsockopt(clientFD, SOL_SOCKET, SO_ERROR, &socketError, &len);
-        if(socketError){
-            std::cerr << "Socket error: " << strerror(socketError) << "\n";
-        }
-        else {
-            std::cout << "Socket healthy, data should be sent\n";
-        }
-    }
-};
+}
 
 bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header){
-    // Read the full message
-    LoginRequest request;
+    LoginRequest request{};
     request.header = header;
     ssize_t bytes = recv(clientFD, &request.username, sizeof(request.username) + sizeof(request.password), MSG_WAITALL);
-    
-    if(bytes != sizeof(request.username) + sizeof(request.password)){
-        std::cerr << std::endl << "Failed to read full payload";
+
+    if(bytes != static_cast<ssize_t>(sizeof(request.username) + sizeof(request.password))){
+        std::cerr << "\nFailed to read full payload";
         return false;
     }
 
-    // Process the request
-    request.username[sizeof(request.username)-1] = '\0';
-    request.password[sizeof(request.password)-1] = '\0';
+    request.username[sizeof(request.username) - 1] = '\0';
+    request.password[sizeof(request.password) - 1] = '\0';
+
     fs::path jsonPath = "storage.json";
-
-    // Verify file exists
-    if(!fs::exists(jsonPath)) {
+    if(!fs::exists(jsonPath))
         throw std::runtime_error("File not found: " + jsonPath.string());
-    }
-    else{
-        // std::cout << std::endl << "Found file json";
-    }
 
-    // Open the file and parse with error handling
     std::ifstream jsonFile(jsonPath);
     json data = json::parse(jsonFile);
 
-    std::string expectedUsername;
-    std::string expectedPassword;
+    std::string clientUsername    = request.username;
+    std::string clientPasswordHash = request.password;  // client sends SHA256 hex
 
-    // Access and print data
     for(const auto& user : data["users"]){
-        expectedUsername = user["username"];
-        expectedPassword = user["password_hash"];
+        std::string storedUsername = user["username"];
+        std::string storedHash     = user["password_hash"];
+
+        if(crc32(storedUsername) == crc32(clientUsername) && storedHash == clientPasswordHash){
+            std::cout << "\nSuccess: Credentials match\n";
+            return true;
+        }
     }
 
-    std::string clientUsername = request.username;
-    std::string clientPassword = request.password;
-    std::string passwordHashed = sha256(clientPassword);
-    bool passValid{false};
-    
-    if(expectedPassword == passwordHashed){
-        std::cout << std::endl << "Passed sha256";
-        passValid = true;
-    }
-    else{
-        passValid = false;
-    }
-
-    // Compute CRC32 checksums
-    uint32_t serverUsernameChecksum = crc32(expectedUsername);
-    uint32_t clientUsernameChecksum = crc32(clientUsername);
-
-    //----------------------------------------------------- Debug -----------------------------------------------------
-    // std::cout << std::endl << "ServerUsername: '" << expectedUsername << "' CRC32: 0x" << std::hex << serverUsernameChecksum;
-    // std::cout << std::endl << "ClientUsername: '" << clientUsername << "' CRC32: 0x" << std::hex << clientUsernameChecksum;
-    // std::cout << std::endl << "ServerPassword: '" << expectedPassword << "' CRC32: 0x" << std::hex << serverPasswordChecksum;
-    // std::cout << std::endl << "ClientPassword: '" << clientPassword << "' CRC32: 0x" << std::hex << clientPasswordChecksum;
-    //----------------------------------------------------- Debug -----------------------------------------------------
-
-    // Compare checksums
-    if((serverUsernameChecksum == clientUsernameChecksum) && (passValid == true)){
-        std::cout << std::endl << "Success: Username and password matches" << std::endl;
-        return true;
-    }
-    else if((serverUsernameChecksum != clientUsernameChecksum)){
-        std::cout << std::endl << "Failed: Username mismatch" << std::endl;
-        return false;
-    }
-    else if((passValid == false) ){
-        std::cout << std::endl << "Failed: Password mismatch" << std::endl;
-        return false;
-    }
-    else{
-        std::cout << std::endl << "Failed: Username CRC32 mismatch (error detected!)." << std::endl;
-        return false;
-    }
-};
+    std::cout << "\nFailed: No matching credentials\n";
+    return false;
+}
 
 void SocketServer::handleClientMessage(int clientFD) {
-    // Read the header
-    MessageHeader header;
+    MessageHeader header{};
     ssize_t bytes = recv(clientFD, &header, sizeof(header), MSG_WAITALL);
-    
+
     if(bytes <= 0){
-        if(bytes == 0){
-            std::cout << std::endl << "Client disconnected gracefully" << std::flush;
-        }
-        else {
-            if(errno == ECONNRESET){
-                std::cout << std::endl << "Client " << clientFD << " disconnected abruptly (connection reset)";
-            } 
-            else{
-                std::cerr << std::endl << "recv() error: " << strerror(errno);
-            }
-        }
+        if(bytes == 0)
+            std::cout << "\nClient disconnected gracefully" << std::flush;
+        else if(errno == ECONNRESET)
+            std::cout << "\nClient " << clientFD << " disconnected abruptly" << std::flush;
+        else
+            std::cerr << "\nrecv() error: " << strerror(errno);
         return;
     }
 
-    // ----------------------------- Debug -----------------------------
-    // std::cout << std::endl << "header.msgSize: " << htons(header.msgSize);
-    // std::cout << std::endl << "header.msgType: " << static_cast<int>(header.msgType);
-    // std::cout << std::endl << "header.reqId: " << static_cast<int>(header.reqId);
-    // ----------------------------- Debug -----------------------------
-
-    bool responseStatus;
     switch(static_cast<int>(header.msgType)){
-        case 0: // Handle login request and login response
-            responseStatus = handleLoginRequest(clientFD, header);
-            // std::cout << std::endl << "responseStatus: " << responseStatus << std::flush;
-            handleLoginResponse(clientFD, responseStatus, header);
+        case 0: {
+            bool status = handleLoginRequest(clientFD, header);
+            handleLoginResponse(clientFD, status, header);
             break;
+        }
         case 2:
-            std::cout << "\ntype2" <<std::flush;
-            break;        
+            std::cout << "\ntype2" << std::flush;
+            break;
         default:
-            std::cout << "\tNo type" <<std::flush;
+            std::cout << "\tUnknown type" << std::flush;
             break;
     }
 }
@@ -315,111 +195,110 @@ void SocketServer::run() {
     running = true;
     startConsoleListener();
 
-    int clientFD = -1;
-    
     while(running){
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(serverFD, &readfds);
-        FD_SET(wakeupFD, &readfds);
-        
-        // Conditionally add client socket to monitoring set
-        if(clientFD != -1){
-            FD_SET(clientFD, &readfds);
+        FD_SET(wakeupReadFD, &readfds);
+
+        int maxFD = std::max(serverFD, wakeupReadFD);
+        for(int fd : clients){
+            if(fd != -1){
+                FD_SET(fd, &readfds);
+                maxFD = std::max(maxFD, fd);
+            }
         }
 
         timeval tv{.tv_sec = 0, .tv_usec = 100000};
-
-        // Dynamically adjust this based on active connections.
-        int maxFD = std::max(serverFD, wakeupFD);
-        if(clientFD != -1){
-            maxFD = std::max(maxFD, clientFD);
-        }
-        
         int activity = select(maxFD + 1, &readfds, nullptr, nullptr, &tv);
-        
-        // Check wakeup pipe first
-        if(FD_ISSET(wakeupFD, &readfds)){
+
+        if(FD_ISSET(wakeupReadFD, &readfds)){
             char dummy;
-            read(wakeupFD, &dummy, 1);
-            running = false;
+            read(wakeupReadFD, &dummy, 1);
             break;
         }
 
         if(!running) break;
 
         if(activity < 0){
-            if(errno == EINTR) continue;  // Interrupted system call
-            if(errno == EBADF) continue;  // Bad file descriptor
+            if(errno == EINTR || errno == EBADF) continue;
             throw std::system_error(errno, std::generic_category(), "select() failed");
         }
 
-        // Handle new connection
+        // Accept new connection
         if(FD_ISSET(serverFD, &readfds)){
             sockaddr_in clientAddr{};
             socklen_t addrLen = sizeof(clientAddr);
-
-            // Accept the pending connection
-            clientFD = accept(serverFD, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
-            if(clientFD < 0){
+            int newFD = accept(serverFD, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
+            if(newFD < 0){
                 if(errno == EWOULDBLOCK || errno == EAGAIN) continue;
                 throw std::system_error(errno, std::generic_category(), "accept() failed");
             }
 
-            uint8_t currentReqID = generateUniqueReqID();
-    
-            // Log connection details
-            char client_ip[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
-            std::cout << std::endl << "New connection: " << client_ip << " (FD: " << clientFD << ")" << std::flush;
-            
-            // Send welcome message
-            constexpr std::string_view welcome = "From Server: Connection established";
-            if(send(clientFD, &currentReqID, sizeof(currentReqID), MSG_NOSIGNAL) == -1) {
-                handleClientDisconnect(clientFD);
-                clientFD = -1;
-                continue;
+            int slot = -1;
+            for(int i = 0; i < MAXCLIENT; ++i){
+                if(clients[i] == -1){ slot = i; break; }
+            }
+
+            if(slot == -1){
+                std::cout << "\nMax clients reached, rejecting connection\n";
+                close(newFD);
+            } else {
+                clients[slot] = newFD;
+                uint8_t reqID = generateUniqueReqID();
+                char client_ip[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
+                std::cout << "\nNew connection: " << client_ip << " (FD: " << newFD << ")" << std::flush;
+
+                if(send(newFD, &reqID, sizeof(reqID), MSG_NOSIGNAL) == -1){
+                    handleClientDisconnect(newFD);
+                    clients[slot] = -1;
+                }
             }
         }
 
-        // Handle existing client communication
-        if(clientFD != -1 && FD_ISSET(clientFD, &readfds)){
+        // Service existing clients
+        for(int i = 0; i < MAXCLIENT; ++i){
+            int fd = clients[i];
+            if(fd == -1 || !FD_ISSET(fd, &readfds)) continue;
+
             try {
-                handleClientMessage(clientFD);
+                handleClientMessage(fd);
             } catch(const std::exception& e) {
-                std::cerr << std::endl << "Client handling error: " << e.what();
-                handleClientDisconnect(clientFD);
-                clientFD = -1;
+                std::cerr << "\nClient handling error: " << e.what();
+                handleClientDisconnect(fd);
+                clients[i] = -1;
                 continue;
             }
-            
-            // Check if client disconnected
+
+            // Detect disconnect after message handling
             char buf;
-            int ret = recv(clientFD, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
-            if(ret == 0 || (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK)) {
-                handleClientDisconnect(clientFD);
-                clientFD = -1;
+            int ret = recv(fd, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
+            if(ret == 0 || (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK)){
+                handleClientDisconnect(fd);
+                clients[i] = -1;
             }
         }
     }
 
-    // Cleanup
-    if(clientFD != -1) {
-        handleClientDisconnect(clientFD);
+    for(int i = 0; i < MAXCLIENT; ++i){
+        if(clients[i] != -1){
+            handleClientDisconnect(clients[i]);
+            clients[i] = -1;
+        }
     }
-    consoleThread.join();
 }
 
 int main(){
     try{
         SocketServer server(8080);
-        std::cout << "Type 'exit' and press Enter to shutdown" << std::endl;
+        std::cout << "Type 'exit' and press Enter to shutdown\n";
         server.run();
-        std::cout << "Server shutdown" << std::endl;
+        std::cout << "Server shutdown\n";
         return EXIT_SUCCESS;
     }
     catch(const std::exception& e){
-        std::cerr << std::endl << "Server error: " << e.what() << std::endl;
+        std::cerr << "\nServer error: " << e.what() << "\n";
         return EXIT_FAILURE;
     }
 }
