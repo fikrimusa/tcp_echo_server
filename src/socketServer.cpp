@@ -113,25 +113,21 @@ void SocketServer::handleLoginResponse(int clientFD, bool validStatus, const Mes
     response.header.reqId   = header.reqId;
     response.status         = htons(validStatus ? 1 : 0);
 
-    std::cout << "\n---------------------------------"
-              << "\n[Sending Login Response to client]"
-              << "\n  Size:   " << sizeof(LoginResponse)
-              << "\n  Type:   " << static_cast<int>(response.header.msgType)
-              << "\n  ReqID:  " << static_cast<int>(response.header.reqId)
-              << "\n  Status: " << (validStatus ? "SUCCESS" : "FAILURE")
-              << "\n---------------------------------";
+    std::cout << "\n[Login Response -> client " << clientFD << "] "
+              << (validStatus ? "SUCCESS" : "FAILURE") << "\n";
 
     if(send(clientFD, &response, sizeof(response), MSG_NOSIGNAL) != sizeof(response))
         throw std::runtime_error("Failed to send Login Response");
 }
 
-bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header){
+bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header, std::string& outUsername){
     LoginRequest request{};
     request.header = header;
-    ssize_t bytes = recv(clientFD, &request.username, sizeof(request.username) + sizeof(request.password), MSG_WAITALL);
+    ssize_t bytes = recv(clientFD, &request.username,
+                         sizeof(request.username) + sizeof(request.password), MSG_WAITALL);
 
     if(bytes != static_cast<ssize_t>(sizeof(request.username) + sizeof(request.password))){
-        std::cerr << "\nFailed to read full payload";
+        std::cerr << "\nFailed to read full login payload";
         return false;
     }
 
@@ -145,30 +141,61 @@ bool SocketServer::handleLoginRequest(int clientFD, const MessageHeader& header)
     std::ifstream jsonFile(jsonPath);
     json data = json::parse(jsonFile);
 
-    std::string clientUsername    = request.username;
-    std::string clientPasswordHash = request.password;  // client sends SHA256 hex
+    std::string clientUsername     = request.username;
+    std::string clientPasswordHash = request.password;
 
     for(const auto& user : data["users"]){
         std::string storedUsername = user["username"];
         std::string storedHash     = user["password_hash"];
 
         if(crc32(storedUsername) == crc32(clientUsername) && storedHash == clientPasswordHash){
-            std::cout << "\nSuccess: Credentials match\n";
+            std::cout << "\nLogin success for '" << storedUsername << "'\n";
+            outUsername = storedUsername;
             return true;
         }
     }
 
-    std::cout << "\nFailed: No matching credentials\n";
+    std::cout << "\nLogin failed: no matching credentials\n";
     return false;
 }
 
-void SocketServer::handleClientMessage(int clientFD) {
+void SocketServer::broadcastMessage(int senderSlot, const ChatMessage& msg){
+    for(int i = 0; i < MAXCLIENT; ++i){
+        if(i == senderSlot || clients[i] == -1 || usernames[i].empty()) continue;
+        if(send(clients[i], &msg, sizeof(msg), MSG_NOSIGNAL) == -1)
+            std::cerr << "\nFailed to broadcast to client " << clients[i];
+    }
+}
+
+void SocketServer::handleChatMessage(int clientFD, int slot, const MessageHeader& header){
+    ChatMessage msg{};
+    msg.header = header;
+    ssize_t bytes = recv(clientFD, &msg.username,
+                         sizeof(msg.username) + sizeof(msg.text), MSG_WAITALL);
+
+    if(bytes != static_cast<ssize_t>(sizeof(msg.username) + sizeof(msg.text))){
+        std::cerr << "\nFailed to read full chat payload";
+        return;
+    }
+    msg.username[sizeof(msg.username) - 1] = '\0';
+    msg.text[sizeof(msg.text) - 1]         = '\0';
+
+    // Use server-stored username to prevent spoofing
+    strncpy(msg.username, usernames[slot].c_str(), sizeof(msg.username) - 1);
+    msg.username[sizeof(msg.username) - 1] = '\0';
+
+    std::cout << "\n[" << msg.username << "]: " << msg.text << std::flush;
+
+    broadcastMessage(slot, msg);
+}
+
+void SocketServer::handleClientMessage(int clientFD, int slot) {
     MessageHeader header{};
     ssize_t bytes = recv(clientFD, &header, sizeof(header), MSG_WAITALL);
 
     if(bytes <= 0){
         if(bytes == 0)
-            std::cout << "\nClient disconnected gracefully" << std::flush;
+            std::cout << "\nClient " << clientFD << " disconnected gracefully" << std::flush;
         else if(errno == ECONNRESET)
             std::cout << "\nClient " << clientFD << " disconnected abruptly" << std::flush;
         else
@@ -178,15 +205,22 @@ void SocketServer::handleClientMessage(int clientFD) {
 
     switch(static_cast<int>(header.msgType)){
         case 0: {
-            bool status = handleLoginRequest(clientFD, header);
+            std::string matchedUser;
+            bool status = handleLoginRequest(clientFD, header, matchedUser);
             handleLoginResponse(clientFD, status, header);
+            if(status) usernames[slot] = matchedUser;
             break;
         }
         case 2:
-            std::cout << "\ntype2" << std::flush;
+            if(usernames[slot].empty()){
+                std::cerr << "\nChat message from unauthenticated client " << clientFD;
+                break;
+            }
+            handleChatMessage(clientFD, slot, header);
             break;
         default:
-            std::cout << "\tUnknown type" << std::flush;
+            std::cerr << "\nUnknown message type " << static_cast<int>(header.msgType)
+                      << " from client " << clientFD;
             break;
     }
 }
@@ -245,11 +279,12 @@ void SocketServer::run() {
                 close(newFD);
             } else {
                 clients[slot] = newFD;
-                uint8_t reqID = generateUniqueReqID();
                 char client_ip[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
-                std::cout << "\nNew connection: " << client_ip << " (FD: " << newFD << ")" << std::flush;
+                std::cout << "\nNew connection: " << client_ip
+                          << " (FD: " << newFD << ", slot: " << slot << ")" << std::flush;
 
+                uint8_t reqID = generateUniqueReqID();
                 if(send(newFD, &reqID, sizeof(reqID), MSG_NOSIGNAL) == -1){
                     handleClientDisconnect(newFD);
                     clients[slot] = -1;
@@ -263,11 +298,12 @@ void SocketServer::run() {
             if(fd == -1 || !FD_ISSET(fd, &readfds)) continue;
 
             try {
-                handleClientMessage(fd);
+                handleClientMessage(fd, i);
             } catch(const std::exception& e) {
                 std::cerr << "\nClient handling error: " << e.what();
                 handleClientDisconnect(fd);
                 clients[i] = -1;
+                usernames[i].clear();
                 continue;
             }
 
@@ -277,6 +313,7 @@ void SocketServer::run() {
             if(ret == 0 || (ret == -1 && errno != EAGAIN && errno != EWOULDBLOCK)){
                 handleClientDisconnect(fd);
                 clients[i] = -1;
+                usernames[i].clear();
             }
         }
     }
@@ -285,6 +322,7 @@ void SocketServer::run() {
         if(clients[i] != -1){
             handleClientDisconnect(clients[i]);
             clients[i] = -1;
+            usernames[i].clear();
         }
     }
 }

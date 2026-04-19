@@ -24,7 +24,6 @@ SocketClient::SocketClient(const std::string& host, uint16_t port)
     }
     std::cout << "\nSuccess: Set to blocking mode";
 
-    // Zero timeout disables SO_RCVTIMEO (no timeout)
     timeval tv{.tv_sec = 0, .tv_usec = 0};
     if(::setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1){
         ::close(clientFD);
@@ -58,20 +57,25 @@ SocketClient::~SocketClient(){
 
 void SocketClient::disconnect(){
     if(clientFD != -1){
+        running = false;
         ::close(clientFD);
         clientFD  = -1;
         connected = false;
+        if(recvThread.joinable())
+            recvThread.join();
         std::cout << "\nDisconnected from server\n";
     }
 }
 
-void SocketClient::handleLoginRequest(const std::string& username, const std::string& password){
+void SocketClient::handleLoginRequest(const std::string& user, const std::string& password){
+    username = user;
+
     LoginRequest req{};
     req.header.msgSize = htons(sizeof(LoginRequest));
     req.header.msgType = 0;
     req.header.reqId   = currentReqID;
 
-    username.copy(req.username, sizeof(req.username) - 1);
+    user.copy(req.username, sizeof(req.username) - 1);
     req.username[sizeof(req.username) - 1] = '\0';
 
     std::string passwordHash = sha256(password);
@@ -82,12 +86,9 @@ void SocketClient::handleLoginRequest(const std::string& username, const std::st
     if(!password.empty()) maskedPw[0] = password[0];
 
     std::cout << "\n---------------------------------"
-              << "\n[Sending Login Request to server]"
-              << "\n  Size:      " << sizeof(LoginRequest) << " bytes"
-              << "\n  Type:      " << static_cast<int>(req.header.msgType)
-              << "\n  RequestID: " << static_cast<int>(req.header.reqId)
-              << "\n  Username:  '" << req.username << "'"
-              << "\n  Password:  '" << maskedPw << "'"
+              << "\n[Sending Login Request]"
+              << "\n  Username: '" << req.username << "'"
+              << "\n  Password: '" << maskedPw << "'"
               << "\n---------------------------------";
 
     if(send(clientFD, &req, sizeof(req), MSG_NOSIGNAL) != sizeof(req))
@@ -104,17 +105,10 @@ bool SocketClient::handleLoginResponse(){
     }
 
     uint16_t status = ntohs(response.status);
-
-    std::cout << "\n---------------------------------"
-              << "\n[Received Login Response from server]"
-              << "\n  Size:   " << ntohs(response.header.msgSize) << " bytes"
-              << "\n  Type:   " << static_cast<int>(response.header.msgType)
-              << "\n  ReqID:  " << static_cast<int>(response.header.reqId)
-              << "\n  Status: " << (status == 1 ? "SUCCESS" : "FAILURE")
-              << "\n---------------------------------";
+    std::cout << "\n[Login Response] Status: " << (status == 1 ? "SUCCESS" : "FAILURE");
 
     if(status == 1){
-        std::cout << "\nLogin Success!\n";
+        std::cout << "\nLogin Success! Welcome, " << username << "\n";
         return true;
     }
     std::cout << "\nLogin Failed. Try again\n";
@@ -122,25 +116,65 @@ bool SocketClient::handleLoginResponse(){
     return false;
 }
 
+void SocketClient::sendChatMessage(const std::string& text){
+    ChatMessage msg{};
+    msg.header.msgSize = htons(sizeof(ChatMessage));
+    msg.header.msgType = 2;
+    msg.header.reqId   = currentReqID;
+
+    username.copy(msg.username, sizeof(msg.username) - 1);
+    msg.username[sizeof(msg.username) - 1] = '\0';
+    text.copy(msg.text, sizeof(msg.text) - 1);
+    msg.text[sizeof(msg.text) - 1] = '\0';
+
+    if(send(clientFD, &msg, sizeof(msg), MSG_NOSIGNAL) != sizeof(msg))
+        throw std::runtime_error("Failed to send chat message");
+}
+
+void SocketClient::startReceiveLoop(){
+    running = true;
+    recvThread = std::thread([this](){
+        while(running){
+            MessageHeader header{};
+            ssize_t bytes = recv(clientFD, &header, sizeof(header), MSG_WAITALL);
+            if(bytes <= 0) break;
+
+            if(header.msgType == 2){
+                ChatMessage msg{};
+                msg.header = header;
+                ssize_t rest = recv(clientFD, &msg.username,
+                                    sizeof(msg.username) + sizeof(msg.text), MSG_WAITALL);
+                if(rest != static_cast<ssize_t>(sizeof(msg.username) + sizeof(msg.text))) break;
+                msg.username[sizeof(msg.username) - 1] = '\0';
+                msg.text[sizeof(msg.text) - 1]         = '\0';
+
+                std::lock_guard<std::mutex> lock(printMtx);
+                std::cout << "\n[" << msg.username << "]: " << msg.text << std::flush;
+            }
+        }
+    });
+}
+
 int main(){
     try{
         std::string username, password, input;
         SocketClient client("127.0.0.1", 8080);
 
-        std::cout << "\nLogin: Please enter username and password:-"
-                  << "\nUsername:";
+        std::cout << "\nUsername: ";
         std::getline(std::cin, username);
-        std::cout << "Password:";
+        std::cout << "Password: ";
         std::getline(std::cin, password);
 
         client.handleLoginRequest(username, password);
         bool loggedIn = client.handleLoginResponse();
 
         if(loggedIn){
+            client.startReceiveLoop();
+            std::cout << "Type a message and press Enter. Type 'exit' to quit.\n";
+
             while(true){
-                std::cout << "\nEnter message to send (or 'exit' to quit): ";
-                if(!std::getline(std::cin, input) || input == "exit")
-                    break;
+                if(!std::getline(std::cin, input) || input == "exit") break;
+                if(!input.empty()) client.sendChatMessage(input);
             }
             client.disconnect();
         }

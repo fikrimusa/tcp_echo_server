@@ -9,10 +9,10 @@
 #include <arpa/inet.h>
 #include <array>
 #include <system_error>
-#include <chrono>
 #include <iomanip>
 #include <atomic>
 #include <thread>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
@@ -51,9 +51,11 @@ public:
     ~SocketServer();
 
     void run();
-    void handleClientMessage(int clientFD);
-    bool handleLoginRequest(int clientFD, const MessageHeader&);
+    void handleClientMessage(int clientFD, int slot);
+    bool handleLoginRequest(int clientFD, const MessageHeader&, std::string& outUsername);
     void handleLoginResponse(int clientFD, bool validStatus, const MessageHeader&);
+    void handleChatMessage(int clientFD, int slot, const MessageHeader&);
+    void broadcastMessage(int senderSlot, const ChatMessage& msg);
     void handleClientDisconnect(int clientFD);
     uint32_t crc32(const std::string&);
     static constexpr auto generateCRCTable();
@@ -69,6 +71,7 @@ private:
     int wakeupReadFD{-1};
     int wakeupWriteFD{-1};
     std::array<int, MAXCLIENT> clients{};
+    std::array<std::string, MAXCLIENT> usernames{};  // empty = not logged in
     struct sockaddr_in serverAddr{};
     std::thread consoleThread;
     std::atomic<bool> running{false};
@@ -85,6 +88,8 @@ public:
     void disconnect();
     void handleLoginRequest(const std::string& username, const std::string& password);
     bool handleLoginResponse();
+    void sendChatMessage(const std::string& text);
+    void startReceiveLoop();
     uint8_t getCurrentReqID() const { return currentReqID; }
 
 private:
@@ -94,5 +99,9 @@ private:
     uint16_t port;
     sockaddr_in clientAddr{};
     uint8_t currentReqID{0};
+    std::string username;
+    std::thread recvThread;
+    std::atomic<bool> running{false};
+    std::mutex printMtx;
 };
 // ====================================================================
