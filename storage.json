@@ -1,7 +1,15 @@
 {
   "users": [
     {
-      "username": "testuser",
+      "username": "User1",
+      "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+    },
+    {
+      "username": "User2",
+      "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+    },
+    {
+      "username": "User3",
       "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
     }
   ]
