@@ -2,19 +2,63 @@
 
 A multi-client TCP chat server and client written in C++17. Clients authenticate with a username and password, then can send messages that are broadcast to all other connected clients in real time. The server acts as a broker — it does not participate in the chat, only forwards messages between clients.
 
+## Architecture
+
+The server is a pure broker. It authenticates clients and forwards messages — it never originates chat messages itself.
+
+```mermaid
+graph LR
+    C1["Client\n(User1)"]
+    C2["Client\n(User2)"]
+    C3["Client\n(User3)"]
+    S["TCP Server\n(Broker)"]
+    DB[("storage.json")]
+
+    C1 -- "ChatMessage" --> S
+    S -- "broadcast" --> C2
+    S -- "broadcast" --> C3
+    S -- "validate\ncredentials" --> DB
+```
+
 ## How It Works
 
-### Connection Flow
-1. Client connects to the server
-2. Server assigns a unique request ID and sends it to the client
-3. Client sends a login request (username + SHA-256 hashed password)
-4. Server validates credentials against `storage.json` and replies with success or failure
-5. On success, the client enters the chat loop
+### Connection & Login Flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant DB as storage.json
+
+    C->>S: TCP Connect
+    S-->>C: reqID (uint8)
+
+    C->>S: LoginRequest (type 0)\nusername + SHA256(password)
+    S->>DB: lookup username
+    DB-->>S: stored password_hash
+    S-->>C: LoginResponse (type 1)\nstatus: OK / FAIL
+
+    alt Login Success
+        C->>C: start receive thread\nenter chat loop
+    else Login Fail
+        C->>C: disconnect
+    end
+```
 
 ### Chat Flow
-1. Client types a message and sends a `ChatMessage` to the server
-2. Server receives it, verifies the sender is authenticated, and broadcasts it to all other connected clients
-3. Each receiving client's background thread picks it up and prints it to the terminal
+
+```mermaid
+sequenceDiagram
+    participant U1 as User1
+    participant S as Server
+    participant U2 as User2
+    participant U3 as User3
+
+    U1->>S: ChatMessage (type 2)\n"hello everyone"
+    S->>S: verify User1 is authenticated\nre-stamp username
+    S-->>U2: ChatMessage\n[User1]: hello everyone
+    S-->>U3: ChatMessage\n[User1]: hello everyone
+```
 
 ### Security
 - Passwords are hashed with SHA-256 on the client before being sent — the raw password never travels over the network
