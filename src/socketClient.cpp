@@ -58,6 +58,7 @@ SocketClient::~SocketClient(){
 void SocketClient::disconnect(){
     if(clientFD != -1){
         running = false;
+        ::shutdown(clientFD, SHUT_RDWR);  // unblocks recv() in recvThread
         ::close(clientFD);
         clientFD  = -1;
         connected = false;
